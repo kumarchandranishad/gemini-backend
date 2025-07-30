@@ -2,16 +2,15 @@ const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
 const { GoogleGenAI, Modality } = require('@google/genai');
+const axios = require('axios');
 
-// Load environment variables
 dotenv.config();
-
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Middleware
 app.use(cors({
-  origin: ['http://localhost:3000', 'https://your-domain.com', '*'], // Add your Hostinger domain
+  origin: ['http://localhost:3000', 'https://your-domain.com', '*'],
   methods: ['GET', 'POST'],
   credentials: true
 }));
@@ -26,7 +25,7 @@ const ai = new GoogleGenAI({
 app.get('/', (req, res) => {
   res.json({ 
     status: 'OK', 
-    message: 'Gemini AI Image Generator Backend is running!',
+    message: 'Nishad Gemini AI Image Generator Backend is running!',
     timestamp: new Date().toISOString()
   });
 });
@@ -40,11 +39,11 @@ app.get('/health', (req, res) => {
   });
 });
 
-// Image generation endpoint
-app.post('/api/generate', async (req, res) => {
-  const { prompt, style } = req.body;
+// Single image generation endpoint (for compatibility)
+app.post('/generate', async (req, res) => {
+  const { prompt, style, model = "img4", size = "1024x1024", num_images = 1 } = req.body;
   
-  console.log('📝 Received request:', { prompt, style });
+  console.log('📝 Received request:', { prompt, style, num_images });
   
   if (!prompt || prompt.trim() === '') {
     return res.status(400).json({ 
@@ -129,7 +128,7 @@ app.post('/api/generate', async (req, res) => {
 });
 
 // Multiple image generation endpoint
-app.post('/api/generate-multiple', async (req, res) => {
+app.post('/generate-multiple', async (req, res) => {
   const { prompt, style, count = 1 } = req.body;
   
   if (!prompt) {
@@ -193,6 +192,41 @@ app.post('/api/generate-multiple', async (req, res) => {
   });
 });
 
+// Image download proxy endpoint (for working downloads)
+app.get("/download-image", async (req, res) => {
+  const { url } = req.query;
+  
+  if (!url) {
+    return res.status(400).json({ error: "URL required" });
+  }
+  
+  try {
+    console.log(`📥 Proxying download for: ${url}`);
+    
+    const response = await axios.get(url, {
+      responseType: 'stream',
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      }
+    });
+    
+    // Set headers for forced download
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const filename = `nishad-ai-image-${timestamp}.png`;
+    
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Type', 'image/png');
+    res.setHeader('Cache-Control', 'no-cache');
+    
+    // Pipe the image stream to response
+    response.data.pipe(res);
+    
+  } catch (error) {
+    console.error("Download proxy error:", error.message);
+    res.status(500).json({ error: "Download failed" });
+  }
+});
+
 // Error handling middleware
 app.use((error, req, res, next) => {
   console.error('❌ Unhandled error:', error);
@@ -211,17 +245,18 @@ app.use('*', (req, res) => {
     available_endpoints: [
       'GET /',
       'GET /health',
-      'POST /api/generate',
-      'POST /api/generate-multiple'
+      'POST /generate',
+      'POST /generate-multiple',
+      'GET /download-image'
     ]
   });
 });
 
 // Start server
 app.listen(PORT, () => {
-  console.log(`🚀 Gemini AI Backend running on port ${PORT}`);
+  console.log(`🚀 Nishad Gemini AI Backend running on port ${PORT}`);
   console.log(`🔗 Health check: http://localhost:${PORT}/health`);
-  console.log(`🎨 Generate endpoint: http://localhost:${PORT}/api/generate`);
+  console.log(`🎨 Generate endpoint: http://localhost:${PORT}/generate`);
   console.log(`🌟 Environment: ${process.env.NODE_ENV || 'development'}`);
 });
 
