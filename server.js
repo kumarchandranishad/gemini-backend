@@ -53,8 +53,7 @@ app.get('/health', (req, res) => {
     uptime: process.uptime(),
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV || 'development',
-    apiKeySet: !!process.env.GEMINI_API_KEY,
-    memoryUsage: process.memoryUsage()
+    apiKeySet: !!process.env.GEMINI_API_KEY
   });
 });
 
@@ -69,13 +68,10 @@ app.post('/generate', async (req, res) => {
     timestamp: new Date().toISOString()
   });
   
-  // Validation
   if (!prompt || prompt.trim() === '') {
-    console.log('❌ No prompt provided');
     return res.status(400).json({ 
       success: false,
-      error: 'Prompt is required and cannot be empty',
-      code: 'MISSING_PROMPT'
+      error: 'Prompt is required and cannot be empty'
     });
   }
 
@@ -122,8 +118,7 @@ app.post('/generate', async (req, res) => {
     console.log('❌ No image found in Gemini response');
     res.status(500).json({ 
       success: false,
-      error: 'No image generated in response',
-      code: 'NO_IMAGE_GENERATED'
+      error: 'No image generated in response'
     });
     
   } catch (error) {
@@ -132,28 +127,19 @@ app.post('/generate', async (req, res) => {
     
     let errorMessage = 'Failed to generate image';
     let statusCode = 500;
-    let errorCode = 'GENERATION_FAILED';
     
     if (error.message.includes('rate limit') || error.message.includes('429')) {
       errorMessage = 'Rate limit exceeded. Please try again in a moment.';
       statusCode = 429;
-      errorCode = 'RATE_LIMIT';
     } else if (error.message.includes('API key') || error.message.includes('401')) {
       errorMessage = 'API key configuration error';
       statusCode = 401;
-      errorCode = 'INVALID_API_KEY';
-    } else if (error.message.includes('quota') || error.message.includes('403')) {
-      errorMessage = 'API quota exceeded';
-      statusCode = 429;
-      errorCode = 'QUOTA_EXCEEDED';
     }
     
     res.status(statusCode).json({ 
       success: false,
       error: errorMessage,
-      code: errorCode,
-      processingTime: processingTime,
-      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+      processingTime: processingTime
     });
   }
 });
@@ -173,8 +159,7 @@ app.post('/generate-multiple', async (req, res) => {
   if (!prompt || prompt.trim() === '') {
     return res.status(400).json({ 
       success: false,
-      error: 'Prompt is required',
-      code: 'MISSING_PROMPT'
+      error: 'Prompt is required'
     });
   }
 
@@ -241,13 +226,12 @@ app.post('/generate-multiple', async (req, res) => {
   });
 });
 
-// Global error handling middleware
+// Global error handling
 app.use((error, req, res, next) => {
   console.error('❌ Unhandled error:', error);
   res.status(500).json({
     success: false,
-    error: 'Internal server error',
-    code: 'INTERNAL_ERROR'
+    error: 'Internal server error'
   });
 });
 
@@ -256,20 +240,8 @@ app.use('*', (req, res) => {
   res.status(404).json({
     success: false,
     error: 'Endpoint not found',
-    code: 'NOT_FOUND',
     availableEndpoints: ['/', '/health', '/generate', '/generate-multiple']
   });
-});
-
-// Graceful shutdown
-process.on('SIGINT', () => {
-  console.log('\n🛑 Shutting down server gracefully...');
-  process.exit(0);
-});
-
-process.on('SIGTERM', () => {
-  console.log('\n🛑 Shutting down server gracefully...');
-  process.exit(0);
 });
 
 // Start server
