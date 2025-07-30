@@ -1,7 +1,7 @@
 {
-  "name": "nishad-backend",
+  "name": "gemini-backend",
   "version": "2.0.0",
-  "description": "Nishad AI Image Generator Backend with Google Gemini API",
+  "description": "Gemini AI Image Generator Backend with Google Gemini API",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -19,9 +19,9 @@
     "google",
     "api",
     "express",
-    "nishad"
+    "backend"
   ],
-  "author": "Nishad Kumar Chandran",
+  "author": "Your Name",
   "license": "MIT",
   "dependencies": {
     "express": "^4.18.2",
@@ -34,10 +34,6 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/kumarchandranishad/nishad-backend.git"
-  },
-  "bugs": {
-    "url": "https://github.com/kumarchandranishad/nishad-backend/issues"
-  },
-  "homepage": "https://github.com/kumarchandranishad/nishad-backend#readme"
+    "url": "https://github.com/kumarchandranishad/gemini-backend.git"
+  }
 }
