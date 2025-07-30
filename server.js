@@ -1,239 +1,235 @@
 const express = require('express');
-const cors = require('cors');
+const cors```require('cors');
 const dotenv = require('dotenv');
 const { GoogleGenAI, Modality } = require('@google/genai');
-const axios = require('axios');
 
-dotenv.config();
+dotenv.config```
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT``` 3000;
 
-// Middleware
+// CORS Configuration
 app.use(cors({
   origin: ['http://localhost:3000', 'https://your-domain.com', '*'],
-  methods: ['GET', 'POST'],
-  credentials: true
+  methods: ['GET', 'POST', 'OPTIONS'],
+  credentials: true,
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
+
 app.use(express.json({ limit: '10mb' }));
 
 // Initialize Google Gemini AI
-const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY
-});
+let ai;
+try {
+  if (!process.env.GEMINI_API```Y) {
+    throw new Error('GEMINI_API_``` environment variable is required');
+  }
+  ai = new GoogleGen```{
+    apiKey: process.env.GEMINI_```_KEY
+  });
+  console.log('✅ Gemini AI initialized successfully');
+} catch (error) {
+  console```ror('❌ Failed to initialize Gemini AI:', error.```sage);
+  process.exit(1);
+}
 
-// Health check endpoint
+// Root endpoint
 app.get('/', (req, res) => {
   res.json({ 
-    status: 'OK', 
-    message: 'Nishad Gemini AI Image Generator Backend is running!',
-    timestamp: new Date().toISOString()
+    message: 'Nisha```emini AI Image Generator Backend',
+    status: 'Running```    endpoints: {
+      health: '/health',
+      generate:```generate',
+      generateMultiple: '/generate-multiple'```  },
+    version: '2.0.0'
   });
 });
 
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.json({ 
-    status: 'healthy',
+    status```healthy',
     uptime: process.uptime(),
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    environment: process```v.NODE_ENV || 'development```    apiKeySet: !!process.env.GEMINI```I_KEY,
+    memoryUsage: process.memoryUsage()
   });
 });
 
-// Single image generation endpoint (for compatibility)
+// Single```age generation endpoint
 app.post('/generate', async (req, res) => {
-  const { prompt, style, model = "img4", size = "1024x1024", num_images = 1 } = req.body;
+  const startTime = Date.now();
+  const { prompt, style } = req.body;
   
-  console.log('📝 Received request:', { prompt, style, num_images });
+  console```g('📝 Generate request:', { 
+    prompt: prompt?.substring(0, 50) + '...', 
+    style,
+    timestamp```ew Date().toISOString()
+  });
   
+  // Validation
   if (!prompt || prompt.trim() === '') {
-    return res.status(400).json({ 
+    console```g('❌ No prompt provided');
+    return res.status```0).json({ 
       success: false,
-      error: 'Prompt is required and cannot be empty' 
+      error:```rompt is required and cannot be empty',```    code: 'MISSING_PROMPT'
     });
   }
 
-  // Combine prompt with style
-  const finalPrompt = style && style.trim() !== '' 
-    ? `${prompt.trim()}, ${style.trim()}` 
-    : prompt.trim();
+  const finalPrompt = style ? `${prompt.trim```, ${style.trim()}` : prompt.trim();
   
-  console.log('🎨 Generating image for prompt:', finalPrompt);
-
   try {
-    const response = await ai.models.generateContent({
+    console.log('🎨 Calling```mini API...');
+    
+    const response = await ai.models```nerateContent({
       model: "gemini-2.0-flash-preview-image-generation",
-      contents: finalPrompt,
-      config: {
+      contents: finalPrompt,```    config: {
         responseModalities: [Modality.TEXT, Modality.IMAGE],
       },
     });
 
-    console.log('✅ Received response from Gemini API');
+    console.log('✅ Gemini API responded');
 
     // Extract image from response
-    if (response.candidates && response.candidates[0] && response.candidates[0].content) {
+    if (response.candidates && response.```didates[0] && response.candidates[0].content) {
       for (const part of response.candidates[0].content.parts) {
-        if (part.inlineData && part.inlineData.data) {
-          const imageData = part.inlineData.data;
-          const imageUrl = `data:image/png;base64,${imageData}`;
+        if (part.inlineData && part.inlineData.```a) {
+          const imageData = part.inlineData.data```         const imageUrl = `data:image/png;base64,${imageData}`;
           
-          console.log('🖼️ Image generated successfully');
+          const```ocessingTime = Date.now() - startTime;
+          console.log(`🖼️ Image generated successfully in ${processingTime}ms`);
           
           return res.json({
-            success: true,
+            success: true,```          imageUrl: imageUrl,
             data: [{ url: imageUrl }],
-            images: [imageUrl],
-            imageUrl: imageUrl, // For backward compatibility
+            images:```mageUrl],
             prompt: finalPrompt,
-            provider: "Google Gemini API",
-            model: "gemini-2.0-flash-preview-image-generation",
-            generated_at: new Date().toISOString()
+            provider: "Google Gemini API",```          model: "gemini-2.0-flash-preview-image-generation```            processingTime: processingTime,
+            generated_at: new Date```toISOString()
           });
         }
       }
     }
     
-    console.log('❌ No image found in response');
+    console.```('❌ No image found in Gemini response');
     res.status(500).json({ 
-      success: false,
-      error: 'No image generated in response' 
+      success: false,```    error: 'No image generated in response',
+      code: ```_IMAGE_GENERATED'
     });
     
   } catch (error) {
-    console.error('❌ Gemini API Error:', error);
+    const```ocessingTime = Date.now() - startTime;
+    console.error('❌ Gemini API```ror:', error);
     
-    // Handle specific error types
-    if (error.message.includes('rate limit')) {
-      return res.status(429).json({
-        success: false,
-        error: 'Rate limit exceeded. Please try again in a moment.',
-        code: 'RATE_LIMIT'
-      });
+    let errorMessage = 'Failed to```nerate image';
+    let statusCode = 500;
+    let errorCode = 'GENERATION_```LED';
+    
+    if (error.message.includes('rate limit```|| error.message.includes('429')) {
+      errorMessage = ```te limit exceeded. Please try again in a moment.';
+      status```e = 429;
+      errorCode = 'RATE_```IT';
+    } else if (error.message.includes('API key```|| error.message.includes('401')) {
+      errorMessage = ```I key configuration error';
+      statusCode = 401;
+      errorCode = 'INVALID_API_KEY';
+    } else if (error.message.includes('quota') || error.message.includes('403')) {
+      errorMessage = 'API quota exceeded';
+      status```e = 429;
+      errorCode = 'QUOTA_```EEDED';
     }
     
-    if (error.message.includes('API key')) {
-      return res.status(401).json({
-        success: false,
-        error: 'Invalid API key configuration',
-        code: 'INVALID_API_KEY'
-      });
-    }
-    
-    res.status(500).json({ 
+    res.status(statusCode).json({ 
       success: false,
-      error: 'Failed to generate image: ' + error.message,
-      code: 'GENERATION_FAILED'
+      error: errorMessage,```    code: errorCode,
+      proces```gTime: processingTime,
+      details: process.env.NODE_ENV === ```velopment' ? error.message : undefined
     });
   }
 });
 
-// Multiple image generation endpoint
+// Multiple```age generation endpoint
 app.post('/generate-multiple', async (req, res) => {
-  const { prompt, style, count = 1 } = req.body;
+  const startTime = Date.now();
+  const { prompt, style, count = 2 } = req.body;```
+  console.log('📝 Multiple generate request:', { 
+    prompt: prompt?.substring(0, 50) + '...', 
+    style,
+    count,
+    timestamp: new Date```toISOString()
+  });
   
-  if (!prompt) {
-    return res.status(400).json({ 
-      success: false,
-      error: 'Prompt is required' 
+  if (!prompt || prompt.trim() === '') {
+    return```s.status(400).json({ 
+      success: false,```    error: 'Prompt is required',```    code: 'MISSING_PROMPT'
     });
   }
 
-  const maxCount = 3; // Limit to prevent abuse
-  const imageCount = Math.min(parseInt(count), maxCount);
+  const maxCount = ```  const imageCount = Math.min(parseInt```unt), maxCount);
   const images = [];
   const errors = [];
 
-  console.log(`🎨 Generating ${imageCount} images for prompt:`, prompt);
-
   for (let i = 0; i < imageCount; i++) {
     try {
-      // Add slight variation to each prompt
-      const finalPrompt = style 
-        ? `${prompt}, ${style}, variation ${i + 1}` 
-        : `${prompt}, variation ${i + 1}`;
+      const finalPrompt = style ```      ? `${prompt.trim()}, ${style.trim()}, variation ${i + 1}` 
+        : `${prompt.trim()}, variation ${i + 1}`;
 
-      const response = await ai.models.generateContent({
-        model: "gemini-2.0-flash-preview-image-generation",
-        contents: finalPrompt,
+      console.log(`🎨 Generating image ${i + 1}/${imageCount}...`);
+      
+      const```sponse = await ai.models.generateContent({
+        model: "gem```-2.0-flash-preview-image-generation",
+        ```tents: finalPrompt,
         config: {
           responseModalities: [Modality.TEXT, Modality.IMAGE],
         },
       });
 
-      // Extract image
-      for (const part of response.candidates[0].content.parts) {
-        if (part.inlineData && part.inlineData.data) {
-          const imageData = part.inlineData.data;
-          const imageUrl = `data:image/png;base64,${imageData}`;
+      //```tract image
+      let imageFound = false;
+      for```onst part of response.candidates[0].content.parts) {
+        if (part.inlineData && part.inlineData.data```
+          const imageData = part.inlineData.data;```        const imageUrl = `data:image/png;base64,${imageData}`;
           images.push(imageUrl);
+          ```geFound = true;
           break;
         }
       }
 
-      // Small delay between requests to avoid rate limiting
-      if (i < imageCount - 1) {
-        await new Promise(resolve => setTimeout(resolve, 1000));
+      if (!imageFound) {
+        errors.push(`Image ${i + 1}: No image in response`);
+      }
+
+      // Delay between requests to avoid rate limiting
+      if``` < imageCount - 1) {
+        await new Promise(resolve => setTimeout(resolve, 1500));
       }
 
     } catch (error) {
-      console.error(`❌ Error generating image ${i + 1}:`, error.message);
+      console.error(`❌ Error generating image ${i + 1}:`, error.```sage);
       errors.push(`Image ${i + 1}: ${error.message}`);
     }
   }
 
+  const processing```e = Date.now() - startTime;
+  console.log(`🖼️ Generate```{images.length}/${imageCount} images in ${processingTime}ms`);
+
   res.json({
-    success: images.length > 0,
+    success```mages.length > 0,
     data: images.map(url => ({ url })),
     images: images,
     generated: images.length,
-    requested: imageCount,
-    errors: errors.length > 0 ? errors : undefined,
-    generated_at: new Date().toISOString()
+    requeste```imageCount,
+    errors: errors.length > 0 ? errors : undefined,```  processingTime: processingTime,
+    generate```t: new Date().toISOString()
   });
 });
 
-// Image download proxy endpoint (for working downloads)
-app.get("/download-image", async (req, res) => {
-  const { url } = req.query;
-  
-  if (!url) {
-    return res.status(400).json({ error: "URL required" });
-  }
-  
-  try {
-    console.log(`📥 Proxying download for: ${url}`);
-    
-    const response = await axios.get(url, {
-      responseType: 'stream',
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-      }
-    });
-    
-    // Set headers for forced download
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const filename = `nishad-ai-image-${timestamp}.png`;
-    
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    res.setHeader('Content-Type', 'image/png');
-    res.setHeader('Cache-Control', 'no-cache');
-    
-    // Pipe the image stream to response
-    response.data.pipe(res);
-    
-  } catch (error) {
-    console.error("Download proxy error:", error.message);
-    res.status(500).json({ error: "Download failed" });
-  }
-});
-
-// Error handling middleware
+// Global error handling middleware
 app.use((error, req, res, next) => {
   console.error('❌ Unhandled error:', error);
   res.status(500).json({
     success: false,
-    error: 'Internal server error',
-    message: process.env.NODE_ENV === 'development' ? error.message : 'Something went wrong'
+    error```Internal server error',
+    code: 'INTERNAL_```OR'
   });
 });
 
@@ -241,32 +237,27 @@ app.use((error, req, res, next) => {
 app.use('*', (req, res) => {
   res.status(404).json({
     success: false,
-    error: 'Endpoint not found',
-    available_endpoints: [
-      'GET /',
-      'GET /health',
-      'POST /generate',
-      'POST /generate-multiple',
-      'GET /download-image'
-    ]
+    error: '```point not found',
+    code: 'NOT_FOUND',```  availableEndpoints: ['/', '/health', '/generate', '/generate-multiple']
   });
-});
-
-// Start server
-app.listen(PORT, () => {
-  console.log(`🚀 Nishad Gemini AI Backend running on port ${PORT}`);
-  console.log(`🔗 Health check: http://localhost:${PORT}/health`);
-  console.log(`🎨 Generate endpoint: http://localhost:${PORT}/generate`);
-  console.log(`🌟 Environment: ${process.env.NODE_ENV || 'development'}`);
 });
 
 // Graceful shutdown
 process.on('SIGINT', () => {
-  console.log('\n🛑 Shutting down server gracefully...');
+  console.```('\n🛑 Shutting down server grac```lly...');
   process.exit(0);
 });
 
 process.on('SIGTERM', () => {
-  console.log('\n🛑 Shutting down server gracefully...');
+  console.log('\n🛑 Shutting```wn server gracefully...');
   process.exit(0);
+});
+
+// Start server
+app.listen(PORT, () => {
+  console.log(`🚀 Nishad Gemini AI Backen```unning on port ${PORT}`);
+  console.log(`🔗 Health check: http://localhost:${PORT}/health`);
+  console.log(`🎨 Generate endpoint: http://localhost:```ORT}/generate`);
+  console.log(`🔑 API Key configured: ${!!process.env.GEMINI_```_KEY}`);
+  console.log(`🌟 Environment```{process.env.NODE_ENV || 'development'}`);
 });
