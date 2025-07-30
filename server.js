@@ -35,8 +35,9 @@ try {
 // Root endpoint
 app.get('/', (req, res) => {
   res.json({ 
-    message: 'Nishad Gemini AI Image Generator Backend',
+    message: 'Gemini Backend - AI Image Generator',
     status: 'Running',
+    repository: 'gemini-backend',
     endpoints: {
       health: '/health',
       generate: '/generate',
@@ -53,7 +54,8 @@ app.get('/health', (req, res) => {
     uptime: process.uptime(),
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV || 'development',
-    apiKeySet: !!process.env.GEMINI_API_KEY
+    apiKeySet: !!process.env.GEMINI_API_KEY,
+    repository: 'gemini-backend'
   });
 });
 
@@ -109,7 +111,8 @@ app.post('/generate', async (req, res) => {
             provider: "Google Gemini API",
             model: "gemini-2.0-flash-preview-image-generation",
             processingTime: processingTime,
-            generated_at: new Date().toISOString()
+            generated_at: new Date().toISOString(),
+            repository: 'gemini-backend'
           });
         }
       }
@@ -222,7 +225,8 @@ app.post('/generate-multiple', async (req, res) => {
     requested: imageCount,
     errors: errors.length > 0 ? errors : undefined,
     processingTime: processingTime,
-    generated_at: new Date().toISOString()
+    generated_at: new Date().toISOString(),
+    repository: 'gemini-backend'
   });
 });
 
@@ -240,15 +244,17 @@ app.use('*', (req, res) => {
   res.status(404).json({
     success: false,
     error: 'Endpoint not found',
-    availableEndpoints: ['/', '/health', '/generate', '/generate-multiple']
+    availableEndpoints: ['/', '/health', '/generate', '/generate-multiple'],
+    repository: 'gemini-backend'
   });
 });
 
 // Start server
 app.listen(PORT, () => {
-  console.log(`🚀 Nishad Gemini AI Backend running on port ${PORT}`);
+  console.log(`🚀 Gemini Backend running on port ${PORT}`);
   console.log(`🔗 Health check: http://localhost:${PORT}/health`);
   console.log(`🎨 Generate endpoint: http://localhost:${PORT}/generate`);
   console.log(`🔑 API Key configured: ${!!process.env.GEMINI_API_KEY}`);
   console.log(`🌟 Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`📁 Repository: gemini-backend`);
 });
