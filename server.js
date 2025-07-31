@@ -7,27 +7,26 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Enhanced CORS Configuration - CRITICAL FIX
+// Enhanced CORS Configuration
 app.use(cors({
   origin: [
-    'https://ddmalarfun.net',           // Your domain
+    'https://ddmalarfun.net',
     'http://localhost:3000',
     'http://localhost:5000',
-    '*'                                // Allow all for testing
+    '*'
   ],
   methods: ['GET', 'POST', 'OPTIONS'],
   credentials: true,
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
 }));
 
-// Additional CORS headers - BACKUP SOLUTION
+// Additional CORS headers
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
   res.header('Access-Control-Allow-Credentials', 'true');
   
-  // Handle preflight requests
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
@@ -36,14 +35,14 @@ app.use((req, res, next) => {
 
 app.use(express.json({ limit: '10mb' }));
 
-// Increase timeout for image generation
+// Increase timeout
 app.use((req, res, next) => {
-  req.setTimeout(120000); // 2 minutes
+  req.setTimeout(120000);
   res.setTimeout(120000);
   next();
 });
 
-// Initialize Google Gemini AI with error handling
+// Initialize Google Gemini AI
 let ai;
 try {
   if (!process.env.GEMINI_API_KEY) {
@@ -55,7 +54,6 @@ try {
   });
   
   console.log('✅ Gemini AI initialized successfully');
-  console.log('🔑 API Key length:', process.env.GEMINI_API_KEY?.length || 0);
 } catch (error) {
   console.error('❌ Failed to initialize Gemini AI:', error.message);
   process.exit(1);
@@ -72,7 +70,7 @@ app.get('/', (req, res) => {
   });
 });
 
-// Health check endpoint - FIXED
+// Health check endpoint
 app.get('/health', (req, res) => {
   console.log('🔍 Health check requested from:', req.get('Origin') || 'Unknown');
   res.status(200).json({ 
@@ -85,7 +83,7 @@ app.get('/health', (req, res) => {
   });
 });
 
-// Image generation endpoint - COMPLETELY FIXED
+// Image generation endpoint
 app.post('/generate', async (req, res) => {
   const startTime = Date.now();
   const { prompt, style } = req.body;
@@ -109,20 +107,19 @@ app.post('/generate', async (req, res) => {
   try {
     console.log('🎨 Calling Gemini API with correct model...');
     
-    // Using the correct Gemini API structure
     const result = await ai.models.generateContent({
-      model: "gemini-2.0-flash-preview-image-generation", // CORRECT MODEL NAME
+      model: "gemini-2.0-flash-preview-image-generation",
       contents: [{ 
         parts: [{ text: finalPrompt }] 
       }],
       generationConfig: {
-        responseModalities: ["TEXT", "IMAGE"] // REQUIRED FOR IMAGE GENERATION
+        responseModalities: ["TEXT", "IMAGE"]
       }
     });
 
     console.log('✅ Gemini API responded successfully');
 
-    // Extract image from response - FIXED STRUCTURE
+    // Extract image from response
     if (result.response && result.response.candidates && result.response.candidates[0]) {
       const parts = result.response.candidates[0].content.parts;
       
@@ -147,8 +144,6 @@ app.post('/generate', async (req, res) => {
     }
     
     console.log('❌ No image found in response');
-    console.log('📋 Response structure:', JSON.stringify(result.response, null, 2));
-    
     res.status(500).json({ 
       success: false,
       error: 'No image generated in response'
@@ -185,6 +180,93 @@ app.post('/generate', async (req, res) => {
   }
 });
 
+// Multiple image generation endpoint
+app.post('/generate-multiple', async (req, res) => {
+  const startTime = Date.now();
+  const { prompt, style, count = 2 } = req.body;
+  
+  console.log('📝 Multiple generate request:', { 
+    prompt: prompt?.substring(0, 50) + '...', 
+    style,
+    count,
+    timestamp: new Date().toISOString()
+  });
+  
+  if (!prompt || prompt.trim() === '') {
+    return res.status(400).json({ 
+      success: false,
+      error: 'Prompt is required'
+    });
+  }
+
+  const maxCount = 3;
+  const imageCount = Math.min(parseInt(count), maxCount);
+  const images = [];
+  const errors = [];
+
+  for (let i = 0; i < imageCount; i++) {
+    try {
+      const finalPrompt = style 
+        ? `${prompt.trim()}, ${style.trim()}, variation ${i + 1}` 
+        : `${prompt.trim()}, variation ${i + 1}`;
+
+      console.log(`🎨 Generating image ${i + 1}/${imageCount}...`);
+      
+      const result = await ai.models.generateContent({
+        model: "gemini-2.0-flash-preview-image-generation",
+        contents: [{ 
+          parts: [{ text: finalPrompt }] 
+        }],
+        generationConfig: {
+          responseModalities: ["TEXT", "IMAGE"]
+        }
+      });
+
+      // Extract image
+      let imageFound = false;
+      if (result.response && result.response.candidates && result.response.candidates[0]) {
+        const parts = result.response.candidates[0].content.parts;
+        
+        for (const part of parts) {
+          if (part.inlineData && part.inlineData.data) {
+            const imageUrl = `data:image/png;base64,${part.inlineData.data}`;
+            images.push(imageUrl);
+            imageFound = true;
+            break;
+          }
+        }
+      }
+
+      if (!imageFound) {
+        errors.push(`Image ${i + 1}: No image in response`);
+      }
+
+      // Delay between requests
+      if (i < imageCount - 1) {
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
+
+    } catch (error) {
+      console.error(`❌ Error generating image ${i + 1}:`, error.message);
+      errors.push(`Image ${i + 1}: ${error.message}`);
+    }
+  }
+
+  const processingTime = Date.now() - startTime;
+  console.log(`🖼️ Generated ${images.length}/${imageCount} images in ${processingTime}ms`);
+
+  res.json({
+    success: images.length > 0,
+    data: images.map(url => ({ url })),
+    images: images,
+    generated: images.length,
+    requested: imageCount,
+    errors: errors.length > 0 ? errors : undefined,
+    processingTime: processingTime,
+    generated_at: new Date().toISOString()
+  });
+});
+
 // Global error handling
 app.use((error, req, res, next) => {
   console.error('❌ Unhandled error:', error);
@@ -194,7 +276,7 @@ app.use((error, req, res, next) => {
   });
 });
 
-// 404 handler with detailed logging
+// 404 handler
 app.use('*', (req, res) => {
   console.log('❌ 404 - Route not found:', req.originalUrl, 'Method:', req.method);
   res.status(404).json({
@@ -202,11 +284,28 @@ app.use('*', (req, res) => {
     error: 'Endpoint not found',
     requestedPath: req.originalUrl,
     method: req.method,
-    availableEndpoints: ['/', '/health', '/generate']
+    availableEndpoints: ['/', '/health', '/generate', '/generate-multiple']
   });
 });
 
 // Start server
 app.listen(PORT, () => {
   console.log(`🚀 Gemini Backend running on port ${PORT}`);
-  console.log(`
+  console.log(`🔗 Health check: http://localhost:${PORT}/health`);
+  console.log(`🎨 Generate endpoint: http://localhost:${PORT}/generate`);
+  console.log(`🔑 API Key configured: ${!!process.env.GEMINI_API_KEY ? 'SET' : 'MISSING'}`);
+  console.log(`🌐 CORS enabled for: https://ddmalarfun.net`);
+  console.log(`🤖 Model: gemini-2.0-flash-preview-image-generation`);
+  console.log(`🌟 Environment: ${process.env.NODE_ENV || 'development'}`);
+});
+
+// Graceful shutdown
+process.on('SIGINT', () => {
+  console.log('\n🛑 Shutting down server gracefully...');
+  process.exit(0);
+});
+
+process.on('SIGTERM', () => {
+  console.log('\n🛑 Shutting down server gracefully...');
+  process.exit(0);
+});
