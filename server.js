@@ -7,12 +7,11 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Enhanced CORS Configuration
+// CORS Configuration
 app.use(cors({
   origin: [
     'https://ddmalarfun.net',
     'http://localhost:3000',
-    'http://localhost:5000',
     '*'
   ],
   methods: ['GET', 'POST', 'OPTIONS'],
@@ -20,27 +19,7 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
 }));
 
-// Additional CORS headers
-app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
-  res.header('Access-Control-Allow-Credentials', 'true');
-  
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
-  next();
-});
-
 app.use(express.json({ limit: '10mb' }));
-
-// Increase timeout
-app.use((req, res, next) => {
-  req.setTimeout(120000);
-  res.setTimeout(120000);
-  next();
-});
 
 // Initialize Google Gemini AI
 let ai;
@@ -83,7 +62,7 @@ app.get('/health', (req, res) => {
   });
 });
 
-// Image generation endpoint
+// Image generation endpoint - FIXED RESPONSE MODALITIES ORDER
 app.post('/generate', async (req, res) => {
   const startTime = Date.now();
   const { prompt, style } = req.body;
@@ -105,15 +84,16 @@ app.post('/generate', async (req, res) => {
   const finalPrompt = style ? `${prompt.trim()}, ${style.trim()}` : prompt.trim();
   
   try {
-    console.log('🎨 Calling Gemini API with correct model...');
+    console.log('🎨 Calling Gemini API with correct model and modalities...');
     
+    // ✅ FIXED: Correct response modalities order - IMAGE, TEXT
     const result = await ai.models.generateContent({
       model: "gemini-2.0-flash-preview-image-generation",
-      contents: [{ 
-        parts: [{ text: finalPrompt }] 
+      contents: [{
+        parts: [{ text: finalPrompt }]
       }],
-      generationConfig: {
-        responseModalities: ["TEXT", "IMAGE"]
+      config: {
+        responseModalities: ["IMAGE", "TEXT"] // ✅ CORRECT ORDER: IMAGE first, then TEXT
       }
     });
 
@@ -169,6 +149,9 @@ app.post('/generate', async (req, res) => {
     } else if (error.message.includes('quota')) {
       errorMessage = 'API quota exceeded';
       statusCode = 429;
+    } else if (error.message.includes('response modalities')) {
+      errorMessage = 'Invalid response modalities configuration';
+      statusCode = 400;
     }
     
     res.status(statusCode).json({ 
@@ -180,7 +163,7 @@ app.post('/generate', async (req, res) => {
   }
 });
 
-// Multiple image generation endpoint
+// Multiple image generation endpoint - FIXED RESPONSE MODALITIES
 app.post('/generate-multiple', async (req, res) => {
   const startTime = Date.now();
   const { prompt, style, count = 2 } = req.body;
@@ -212,13 +195,14 @@ app.post('/generate-multiple', async (req, res) => {
 
       console.log(`🎨 Generating image ${i + 1}/${imageCount}...`);
       
+      // ✅ FIXED: Correct response modalities order
       const result = await ai.models.generateContent({
         model: "gemini-2.0-flash-preview-image-generation",
-        contents: [{ 
-          parts: [{ text: finalPrompt }] 
+        contents: [{
+          parts: [{ text: finalPrompt }]
         }],
-        generationConfig: {
-          responseModalities: ["TEXT", "IMAGE"]
+        config: {
+          responseModalities: ["IMAGE", "TEXT"] // ✅ CORRECT ORDER
         }
       });
 
