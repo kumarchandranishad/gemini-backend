@@ -4,7 +4,7 @@ const dotenv = require('dotenv');
 const { GoogleGenAI } = require('@google/genai');
 
 dotenv.config();
-const app = express(); // ✅ यह line missing थी
+const app = express();
 const PORT = process.env.PORT || 3000;
 
 // CORS Configuration
@@ -62,7 +62,7 @@ app.get('/health', (req, res) => {
   });
 });
 
-// Image generation endpoint
+// Image generation endpoint - FIXED RESPONSE PARSING
 app.post('/generate', async (req, res) => {
   const startTime = Date.now();
   const { prompt, style } = req.body;
@@ -86,25 +86,27 @@ app.post('/generate', async (req, res) => {
   try {
     console.log('🎨 Calling Gemini API with correct model and modalities...');
     
-    const result = await ai.models.generateContent({
+    // FIXED: Use correct API method
+    const result = await ai.generateContent({
       model: "gemini-2.0-flash-preview-image-generation",
       contents: [{
         parts: [{ text: finalPrompt }]
       }],
-      config: {
-        responseModalities: ["IMAGE", "TEXT"]
+      generationConfig: {
+        responseModalities: ["IMAGE", "TEXT"] // Using generationConfig instead of config
       }
     });
 
     console.log('✅ Gemini API responded successfully');
-    
-    // Enhanced response parsing
     console.log('🔍 Analyzing response structure...');
+
+    // ENHANCED RESPONSE PARSING - Multiple Methods
     
-    if (result.response && result.response.candidates && result.response.candidates[0]) {
+    // Method 1: Check result.response (standard structure)
+    if (result.response && result.response.candidates && result.response.candidates.length > 0) {
       const candidate = result.response.candidates[0];
       
-      if (candidate.content && candidate.content.parts) {
+      if (candidate.content && candidate.content.parts && candidate.content.parts.length > 0) {
         for (const part of candidate.content.parts) {
           if (part.inlineData && part.inlineData.data) {
             const imageData = part.inlineData.data;
@@ -112,7 +114,7 @@ app.post('/generate', async (req, res) => {
             const imageUrl = `data:${mimeType};base64,${imageData}`;
             
             const processingTime = Date.now() - startTime;
-            console.log(`🖼️ Image generated successfully in ${processingTime}ms`);
+            console.log(`🖼️ Image found via response.candidates! Size: ${imageData.length} chars`);
             
             return res.json({
               success: true,
@@ -121,30 +123,90 @@ app.post('/generate', async (req, res) => {
               images: [imageUrl],
               prompt: finalPrompt,
               processingTime: processingTime,
-              generated_at: new Date().toISOString()
+              generated_at: new Date().toISOString(),
+              method: 'response.candidates'
             });
           }
         }
       }
     }
     
-    console.log('❌ No image found in response');
+    // Method 2: Check direct result.candidates (alternate structure)
+    if (result.candidates && result.candidates.length > 0) {
+      const candidate = result.candidates[0];
+      
+      if (candidate.content && candidate.content.parts && candidate.content.parts.length > 0) {
+        for (const part of candidate.content.parts) {
+          if (part.inlineData && part.inlineData.data) {
+            const imageData = part.inlineData.data;
+            const mimeType = part.inlineData.mimeType || 'image/png';
+            const imageUrl = `data:${mimeType};base64,${imageData}`;
+            
+            console.log(`🖼️ Image found via direct candidates! Size: ${imageData.length} chars`);
+            
+            return res.json({
+              success: true,
+              imageUrl: imageUrl,
+              data: [{ url: imageUrl }],
+              images: [imageUrl],
+              prompt: finalPrompt,
+              processingTime: Date.now() - startTime,
+              generated_at: new Date().toISOString(),
+              method: 'direct.candidates'
+            });
+          }
+        }
+      }
+    }
+    
+    // Method 3: Check if image data is in different location
+    if (result.image || result.data) {
+      const imageData = result.image || result.data;
+      const imageUrl = `data:image/png;base64,${imageData}`;
+      
+      console.log(`🖼️ Image found via alternate field!`);
+      
+      return res.json({
+        success: true,
+        imageUrl: imageUrl,
+        data: [{ url: imageUrl }],
+        images: [imageUrl],
+        prompt: finalPrompt,
+        processingTime: Date.now() - startTime,
+        generated_at: new Date().toISOString(),
+        method: 'alternate.field'
+      });
+    }
+    
+    // If no image found, log complete response structure for debugging
+    console.log('❌ No image found - Complete response structure:');
+    console.log('Result keys:', Object.keys(result));
+    console.log('Full result:', JSON.stringify(result, null, 2));
+    
     res.status(500).json({ 
       success: false,
-      error: 'No image generated in response'
+      error: 'No image generated in response',
+      debug: {
+        resultKeys: Object.keys(result),
+        hasResponse: !!result.response,
+        hasCandidates: !!result.candidates,
+        candidatesCount: result.candidates?.length || result.response?.candidates?.length || 0
+      }
     });
     
   } catch (error) {
     const processingTime = Date.now() - startTime;
     console.error('❌ Generation Error Details:', {
       message: error.message,
+      name: error.name,
       processingTime
     });
     
     res.status(500).json({ 
       success: false,
       error: 'Failed to generate image: ' + error.message,
-      processingTime
+      processingTime,
+      errorType: error.name
     });
   }
 });
