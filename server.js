@@ -62,7 +62,7 @@ app.get('/health', (req, res) => {
   });
 });
 
-// Image generation endpoint - FIXED RESPONSE PARSING
+// Image generation endpoint - FIXED METHOD CALL
 app.post('/generate', async (req, res) => {
   const startTime = Date.now();
   const { prompt, style } = req.body;
@@ -86,23 +86,21 @@ app.post('/generate', async (req, res) => {
   try {
     console.log('🎨 Calling Gemini API with correct model and modalities...');
     
-    // FIXED: Use correct API method
-    const result = await ai.generateContent({
+    // ✅ FIXED: Correct method call - ai.models.generateContent
+    const result = await ai.models.generateContent({
       model: "gemini-2.0-flash-preview-image-generation",
       contents: [{
         parts: [{ text: finalPrompt }]
       }],
-      generationConfig: {
-        responseModalities: ["IMAGE", "TEXT"] // Using generationConfig instead of config
+      config: {
+        responseModalities: ["IMAGE", "TEXT"] // ✅ Correct modalities order
       }
     });
 
     console.log('✅ Gemini API responded successfully');
     console.log('🔍 Analyzing response structure...');
 
-    // ENHANCED RESPONSE PARSING - Multiple Methods
-    
-    // Method 1: Check result.response (standard structure)
+    // Enhanced response parsing
     if (result.response && result.response.candidates && result.response.candidates.length > 0) {
       const candidate = result.response.candidates[0];
       
@@ -114,7 +112,7 @@ app.post('/generate', async (req, res) => {
             const imageUrl = `data:${mimeType};base64,${imageData}`;
             
             const processingTime = Date.now() - startTime;
-            console.log(`🖼️ Image found via response.candidates! Size: ${imageData.length} chars`);
+            console.log(`🖼️ Image generated successfully in ${processingTime}ms`);
             
             return res.json({
               success: true,
@@ -123,74 +121,22 @@ app.post('/generate', async (req, res) => {
               images: [imageUrl],
               prompt: finalPrompt,
               processingTime: processingTime,
-              generated_at: new Date().toISOString(),
-              method: 'response.candidates'
+              generated_at: new Date().toISOString()
             });
           }
         }
       }
     }
     
-    // Method 2: Check direct result.candidates (alternate structure)
-    if (result.candidates && result.candidates.length > 0) {
-      const candidate = result.candidates[0];
-      
-      if (candidate.content && candidate.content.parts && candidate.content.parts.length > 0) {
-        for (const part of candidate.content.parts) {
-          if (part.inlineData && part.inlineData.data) {
-            const imageData = part.inlineData.data;
-            const mimeType = part.inlineData.mimeType || 'image/png';
-            const imageUrl = `data:${mimeType};base64,${imageData}`;
-            
-            console.log(`🖼️ Image found via direct candidates! Size: ${imageData.length} chars`);
-            
-            return res.json({
-              success: true,
-              imageUrl: imageUrl,
-              data: [{ url: imageUrl }],
-              images: [imageUrl],
-              prompt: finalPrompt,
-              processingTime: Date.now() - startTime,
-              generated_at: new Date().toISOString(),
-              method: 'direct.candidates'
-            });
-          }
-        }
-      }
-    }
-    
-    // Method 3: Check if image data is in different location
-    if (result.image || result.data) {
-      const imageData = result.image || result.data;
-      const imageUrl = `data:image/png;base64,${imageData}`;
-      
-      console.log(`🖼️ Image found via alternate field!`);
-      
-      return res.json({
-        success: true,
-        imageUrl: imageUrl,
-        data: [{ url: imageUrl }],
-        images: [imageUrl],
-        prompt: finalPrompt,
-        processingTime: Date.now() - startTime,
-        generated_at: new Date().toISOString(),
-        method: 'alternate.field'
-      });
-    }
-    
-    // If no image found, log complete response structure for debugging
-    console.log('❌ No image found - Complete response structure:');
-    console.log('Result keys:', Object.keys(result));
-    console.log('Full result:', JSON.stringify(result, null, 2));
+    console.log('❌ No image found in response');
+    console.log('📊 Full response:', JSON.stringify(result, null, 2));
     
     res.status(500).json({ 
       success: false,
       error: 'No image generated in response',
       debug: {
-        resultKeys: Object.keys(result),
-        hasResponse: !!result.response,
-        hasCandidates: !!result.candidates,
-        candidatesCount: result.candidates?.length || result.response?.candidates?.length || 0
+        candidatesCount: result.response?.candidates?.length || 0,
+        responseKeys: Object.keys(result)
       }
     });
     
@@ -211,6 +157,94 @@ app.post('/generate', async (req, res) => {
   }
 });
 
+// Multiple image generation endpoint
+app.post('/generate-multiple', async (req, res) => {
+  const startTime = Date.now();
+  const { prompt, style, count = 2 } = req.body;
+  
+  console.log('📝 Multiple generate request:', { 
+    prompt: prompt?.substring(0, 50) + '...', 
+    style,
+    count,
+    timestamp: new Date().toISOString()
+  });
+  
+  if (!prompt || prompt.trim() === '') {
+    return res.status(400).json({ 
+      success: false,
+      error: 'Prompt is required'
+    });
+  }
+
+  const maxCount = 3;
+  const imageCount = Math.min(parseInt(count), maxCount);
+  const images = [];
+  const errors = [];
+
+  for (let i = 0; i < imageCount; i++) {
+    try {
+      const finalPrompt = style 
+        ? `${prompt.trim()}, ${style.trim()}, variation ${i + 1}` 
+        : `${prompt.trim()}, variation ${i + 1}`;
+
+      console.log(`🎨 Generating image ${i + 1}/${imageCount}...`);
+      
+      // ✅ FIXED: Correct method call - ai.models.generateContent
+      const result = await ai.models.generateContent({
+        model: "gemini-2.0-flash-preview-image-generation",
+        contents: [{
+          parts: [{ text: finalPrompt }]
+        }],
+        config: {
+          responseModalities: ["IMAGE", "TEXT"]
+        }
+      });
+
+      // Extract image
+      let imageFound = false;
+      if (result.response && result.response.candidates && result.response.candidates[0]) {
+        const parts = result.response.candidates[0].content.parts;
+        
+        for (const part of parts) {
+          if (part.inlineData && part.inlineData.data) {
+            const imageUrl = `data:image/png;base64,${part.inlineData.data}`;
+            images.push(imageUrl);
+            imageFound = true;
+            break;
+          }
+        }
+      }
+
+      if (!imageFound) {
+        errors.push(`Image ${i + 1}: No image in response`);
+      }
+
+      // Delay between requests
+      if (i < imageCount - 1) {
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
+
+    } catch (error) {
+      console.error(`❌ Error generating image ${i + 1}:`, error.message);
+      errors.push(`Image ${i + 1}: ${error.message}`);
+    }
+  }
+
+  const processingTime = Date.now() - startTime;
+  console.log(`🖼️ Generated ${images.length}/${imageCount} images in ${processingTime}ms`);
+
+  res.json({
+    success: images.length > 0,
+    data: images.map(url => ({ url })),
+    images: images,
+    generated: images.length,
+    requested: imageCount,
+    errors: errors.length > 0 ? errors : undefined,
+    processingTime: processingTime,
+    generated_at: new Date().toISOString()
+  });
+});
+
 // Global error handling
 app.use((error, req, res, next) => {
   console.error('❌ Unhandled error:', error);
@@ -228,7 +262,7 @@ app.use('*', (req, res) => {
     error: 'Endpoint not found',
     requestedPath: req.originalUrl,
     method: req.method,
-    availableEndpoints: ['/', '/health', '/generate']
+    availableEndpoints: ['/', '/health', '/generate', '/generate-multiple']
   });
 });
 
