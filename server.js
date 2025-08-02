@@ -21,7 +21,7 @@ app.use(cors({
 
 app.use(express.json({ limit: '10mb' }));
 
-// API Keys Array Setup (10 keys for rotation)
+// API Keys Array Setup
 const API_KEYS = [
   process.env.GEMINI_API_KEY_1,
   process.env.GEMINI_API_KEY_2,
@@ -33,7 +33,7 @@ const API_KEYS = [
   process.env.GEMINI_API_KEY_8,
   process.env.GEMINI_API_KEY_9,
   process.env.GEMINI_API_KEY_10
-].filter(key => key); // Remove undefined keys
+].filter(key => key);
 
 // Smart API Key Rotator Class
 class APIKeyRotator {
@@ -59,12 +59,10 @@ class APIKeyRotator {
     while (attempts < this.apiKeys.length) {
       const keyInfo = this.keyHealth[this.currentIndex];
       
-      // Check if key is available
       if (keyInfo.isHealthy && 
           keyInfo.usageCount < 95 && 
           (!keyInfo.cooldownUntil || keyInfo.cooldownUntil < now)) {
         
-        // Update usage
         keyInfo.usageCount++;
         keyInfo.lastUsed = now;
         
@@ -73,23 +71,19 @@ class APIKeyRotator {
           index: this.currentIndex
         };
         
-        // Move to next key for next request
         this.currentIndex = (this.currentIndex + 1) % this.apiKeys.length;
-        
         return selectedKey;
       }
       
-      // Try next key
       this.currentIndex = (this.currentIndex + 1) % this.apiKeys.length;
       attempts++;
       
-      // Prevent infinite loop
       if (this.currentIndex === startIndex && attempts > 0) {
         break;
       }
     }
     
-    return null; // All keys exhausted
+    return null;
   }
 
   markKeyExhausted(keyIndex, cooldownMinutes = 60) {
@@ -132,11 +126,10 @@ class APIKeyRotator {
   }
 }
 
-// Initialize Rotator
 const keyRotator = new APIKeyRotator(API_KEYS);
 console.log(`Initialized with ${API_KEYS.length} API keys`);
 
-// Enhanced Generation Function with Auto-Failover
+// FIXED: Enhanced Generation Function with Better Response Parsing
 async function generateWithAutoFailover(prompt, sizeRatio, maxAttempts = 3) {
   let attempt = 0;
   
@@ -152,7 +145,6 @@ async function generateWithAutoFailover(prompt, sizeRatio, maxAttempts = 3) {
       
       const ai = new GoogleGenAI({ apiKey: keySelection.key });
       
-      // Include size ratio in prompt for better generation
       let finalPrompt = prompt.trim();
       if (sizeRatio) {
         const sizeDescription = {
@@ -175,6 +167,16 @@ async function generateWithAutoFailover(prompt, sizeRatio, maxAttempts = 3) {
       });
       
       console.log(`Success with key ${keySelection.index + 1}`);
+      
+      // ENHANCED: Log full response structure for debugging
+      console.log('Response structure:', JSON.stringify({
+        hasCandidates: !!result.candidates,
+        candidatesLength: result.candidates?.length || 0,
+        firstCandidateKeys: result.candidates?.[0] ? Object.keys(result.candidates[0]) : [],
+        contentKeys: result.candidates?.[0]?.content ? Object.keys(result.candidates[0].content) : [],
+        partsLength: result.candidates?.[0]?.content?.parts?.length || 0
+      }, null, 2));
+      
       return { result, keyIndex: keySelection.index };
       
     } catch (error) {
@@ -184,20 +186,17 @@ async function generateWithAutoFailover(prompt, sizeRatio, maxAttempts = 3) {
           error.message.includes('quota') || 
           error.message.includes('RESOURCE_EXHAUSTED')) {
         
-        // Mark key as exhausted
         keyRotator.markKeyExhausted(keySelection.index);
         console.log(`Switching to next available key...`);
         
         attempt++;
         
-        // Add progressive delay
         if (attempt < maxAttempts) {
-          const delay = attempt * 1000; // 1s, 2s, 3s delays
+          const delay = attempt * 1000;
           console.log(`Waiting ${delay}ms before next attempt...`);
           await new Promise(resolve => setTimeout(resolve, delay));
         }
       } else {
-        // Non-quota error, still try next key
         attempt++;
       }
     }
@@ -247,7 +246,7 @@ app.get('/health', (req, res) => {
   });
 });
 
-// Enhanced Single Image Generation (Only single image generation)
+// COMPLETELY FIXED: Enhanced Image Generation with Multiple Extraction Methods
 app.post('/generate', async (req, res) => {
   const startTime = Date.now();
   const { prompt, sizeRatio } = req.body;
@@ -268,21 +267,81 @@ app.post('/generate', async (req, res) => {
   try {
     const { result, keyIndex } = await generateWithAutoFailover(prompt, sizeRatio);
     
-    // Extract image from response
+    // ENHANCED: Multiple extraction methods with detailed logging
     let imageUrl = null;
+    let extractionMethod = 'none';
     
-    if (result.candidates && result.candidates.length > 0) {
-      const candidate = result.candidates;
+    console.log('Starting image extraction...');
+    
+    // Method 1: Standard extraction from result.candidates[0]
+    if (result?.candidates?.length > 0) {
+      const candidate = result.candidates[0];
+      console.log('Candidate structure:', {
+        hasContent: !!candidate.content,
+        hasParts: !!candidate.content?.parts,
+        partsCount: candidate.content?.parts?.length || 0
+      });
       
-      if (candidate.content && candidate.content.parts) {
+      if (candidate?.content?.parts && candidate.content.parts.length > 0) {
         for (let i = 0; i < candidate.content.parts.length; i++) {
           const part = candidate.content.parts[i];
+          console.log(`Part ${i}:`, {
+            hasInlineData: !!part.inlineData,
+            hasData: !!part.inlineData?.data,
+            dataLength: part.inlineData?.data?.length || 0,
+            mimeType: part.inlineData?.mimeType
+          });
           
-          if (part.inlineData && part.inlineData.data) {
+          if (part.inlineData?.data) {
             const mimeType = part.inlineData.mimeType || 'image/png';
             imageUrl = `data:${mimeType};base64,${part.inlineData.data}`;
-            console.log(`Image extracted successfully using key ${keyIndex + 1}`);
+            extractionMethod = `standard-part-${i}`;
+            console.log(`Image extracted via method: ${extractionMethod}`);
             break;
+          }
+        }
+      }
+    }
+    
+    // Method 2: Try direct candidates array access
+    if (!imageUrl && result?.candidates) {
+      console.log('Trying direct candidates access...');
+      const candidates = Array.isArray(result.candidates) ? result.candidates : [result.candidates];
+      
+      for (let candIndex = 0; candIndex < candidates.length; candIndex++) {
+        const candidate = candidates[candIndex];
+        if (candidate?.content?.parts) {
+          for (let partIndex = 0; partIndex < candidate.content.parts.length; partIndex++) {
+            const part = candidate.content.parts[partIndex];
+            if (part?.inlineData?.data) {
+              const mimeType = part.inlineData.mimeType || 'image/png';
+              imageUrl = `data:${mimeType};base64,${part.inlineData.data}`;
+              extractionMethod = `direct-cand-${candIndex}-part-${partIndex}`;
+              console.log(`Image extracted via method: ${extractionMethod}`);
+              break;
+            }
+          }
+          if (imageUrl) break;
+        }
+      }
+    }
+    
+    // Method 3: Check for alternative response structures
+    if (!imageUrl) {
+      console.log('Trying alternative structures...');
+      
+      // Check if image data is elsewhere in response
+      if (result?.response?.candidates) {
+        const candidates = result.response.candidates;
+        if (candidates[0]?.content?.parts) {
+          for (const part of candidates[0].content.parts) {
+            if (part?.inlineData?.data) {
+              const mimeType = part.inlineData.mimeType || 'image/png';
+              imageUrl = `data:${mimeType};base64,${part.inlineData.data}`;
+              extractionMethod = 'response-candidates';
+              console.log(`Image extracted via method: ${extractionMethod}`);
+              break;
+            }
           }
         }
       }
@@ -291,6 +350,8 @@ app.post('/generate', async (req, res) => {
     if (imageUrl) {
       const processingTime = Date.now() - startTime;
       const status = keyRotator.getStatus();
+      
+      console.log(`Image extracted successfully using key ${keyIndex + 1}, method: ${extractionMethod}, size: ${imageUrl.length} chars`);
       
       return res.json({
         success: true,
@@ -304,14 +365,25 @@ app.post('/generate', async (req, res) => {
         keyInfo: {
           usedKey: keyIndex + 1,
           totalKeys: status.totalKeys,
-          remainingCapacity: status.remainingCapacity
+          remainingCapacity: status.remainingCapacity,
+          extractionMethod: extractionMethod
         }
       });
     }
     
+    // If no image found, log the complete response for debugging
+    console.error('No image found - Complete response structure:');
+    console.error(JSON.stringify(result, null, 2));
+    
     res.status(500).json({ 
       success: false,
-      error: 'No image generated in response'
+      error: 'No image generated in response',
+      debug: {
+        hasCandidates: !!result?.candidates,
+        candidatesLength: result?.candidates?.length || 0,
+        responseKeys: Object.keys(result || {}),
+        extractionMethod: extractionMethod
+      }
     });
     
   } catch (error) {
