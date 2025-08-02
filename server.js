@@ -21,7 +21,7 @@ app.use(cors({
 
 app.use(express.json({ limit: '10mb' }));
 
-// 🎯 STEP 3: API Keys Array Setup
+// API Keys Array Setup (10 keys for rotation)
 const API_KEYS = [
   process.env.GEMINI_API_KEY_1,
   process.env.GEMINI_API_KEY_2,
@@ -35,7 +35,7 @@ const API_KEYS = [
   process.env.GEMINI_API_KEY_10
 ].filter(key => key); // Remove undefined keys
 
-// 🎯 STEP 4: Smart API Key Rotator Class
+// Smart API Key Rotator Class
 class APIKeyRotator {
   constructor(apiKeys) {
     this.apiKeys = apiKeys;
@@ -98,7 +98,7 @@ class APIKeyRotator {
       this.keyHealth[keyIndex].cooldownUntil = Date.now() + (cooldownMinutes * 60 * 1000);
       this.keyHealth[keyIndex].errorCount++;
       
-      console.log(`🚫 Key ${keyIndex + 1} marked as exhausted (cooldown: ${cooldownMinutes}min)`);
+      console.log(`Key ${keyIndex + 1} marked as exhausted (cooldown: ${cooldownMinutes}min)`);
     }
   }
 
@@ -109,7 +109,7 @@ class APIKeyRotator {
       keyInfo.cooldownUntil = null;
       keyInfo.errorCount = 0;
     });
-    console.log('🔄 All API keys reset for new day');
+    console.log('All API keys reset for new day');
   }
 
   getStatus() {
@@ -132,12 +132,12 @@ class APIKeyRotator {
   }
 }
 
-// 🎯 STEP 5: Initialize Rotator
+// Initialize Rotator
 const keyRotator = new APIKeyRotator(API_KEYS);
-console.log(`✅ Initialized with ${API_KEYS.length} API keys`);
+console.log(`Initialized with ${API_KEYS.length} API keys`);
 
-// 🎯 STEP 6: Enhanced Generation Function with Auto-Failover
-async function generateWithAutoFailover(prompt, style, maxAttempts = 3) {
+// Enhanced Generation Function with Auto-Failover
+async function generateWithAutoFailover(prompt, sizeRatio, maxAttempts = 3) {
   let attempt = 0;
   
   while (attempt < maxAttempts) {
@@ -148,25 +148,37 @@ async function generateWithAutoFailover(prompt, style, maxAttempts = 3) {
     }
     
     try {
-      console.log(`🔑 Attempt ${attempt + 1}: Using key ${keySelection.index + 1}/${API_KEYS.length}`);
+      console.log(`Attempt ${attempt + 1}: Using key ${keySelection.index + 1}/${API_KEYS.length}`);
       
       const ai = new GoogleGenAI({ apiKey: keySelection.key });
+      
+      // Include size ratio in prompt for better generation
+      let finalPrompt = prompt.trim();
+      if (sizeRatio) {
+        const sizeDescription = {
+          '1:1': 'square format',
+          '4:3': 'standard landscape format',
+          '16:9': 'wide landscape format',
+          '9:16': 'portrait format'
+        };
+        finalPrompt += `, ${sizeDescription[sizeRatio] || 'standard format'}`;
+      }
       
       const result = await ai.models.generateContent({
         model: "gemini-2.0-flash-preview-image-generation",
         contents: [{
-          parts: [{ text: prompt }]
+          parts: [{ text: finalPrompt }]
         }],
         config: {
           responseModalities: ["IMAGE", "TEXT"]
         }
       });
       
-      console.log(`✅ Success with key ${keySelection.index + 1}`);
+      console.log(`Success with key ${keySelection.index + 1}`);
       return { result, keyIndex: keySelection.index };
       
     } catch (error) {
-      console.error(`❌ Key ${keySelection.index + 1} failed:`, error.message);
+      console.error(`Key ${keySelection.index + 1} failed:`, error.message);
       
       if (error.message.includes('429') || 
           error.message.includes('quota') || 
@@ -174,14 +186,14 @@ async function generateWithAutoFailover(prompt, style, maxAttempts = 3) {
         
         // Mark key as exhausted
         keyRotator.markKeyExhausted(keySelection.index);
-        console.log(`🔄 Switching to next available key...`);
+        console.log(`Switching to next available key...`);
         
         attempt++;
         
         // Add progressive delay
         if (attempt < maxAttempts) {
           const delay = attempt * 1000; // 1s, 2s, 3s delays
-          console.log(`⏳ Waiting ${delay}ms before next attempt...`);
+          console.log(`Waiting ${delay}ms before next attempt...`);
           await new Promise(resolve => setTimeout(resolve, delay));
         }
       } else {
@@ -213,9 +225,9 @@ app.get('/', (req, res) => {
   });
 });
 
-// Enhanced health check
+// Health check endpoint
 app.get('/health', (req, res) => {
-  console.log('🔍 Health check requested from:', req.get('Origin') || 'Unknown');
+  console.log('Health check requested from:', req.get('Origin') || 'Unknown');
   
   const status = keyRotator.getStatus();
   
@@ -235,14 +247,14 @@ app.get('/health', (req, res) => {
   });
 });
 
-// 🎯 STEP 7: Enhanced Single Image Generation
+// Enhanced Single Image Generation (Only single image generation)
 app.post('/generate', async (req, res) => {
   const startTime = Date.now();
-  const { prompt, style } = req.body;
+  const { prompt, sizeRatio } = req.body;
   
-  console.log('📝 Single image request:', { 
+  console.log('Single image request:', { 
     prompt: prompt?.substring(0, 50) + '...', 
-    style,
+    sizeRatio,
     timestamp: new Date().toISOString()
   });
   
@@ -253,16 +265,14 @@ app.post('/generate', async (req, res) => {
     });
   }
 
-  const finalPrompt = style ? `${prompt.trim()}, ${style.trim()}` : prompt.trim();
-  
   try {
-    const { result, keyIndex } = await generateWithAutoFailover(finalPrompt, style);
+    const { result, keyIndex } = await generateWithAutoFailover(prompt, sizeRatio);
     
     // Extract image from response
     let imageUrl = null;
     
     if (result.candidates && result.candidates.length > 0) {
-      const candidate = result.candidates[0];
+      const candidate = result.candidates;
       
       if (candidate.content && candidate.content.parts) {
         for (let i = 0; i < candidate.content.parts.length; i++) {
@@ -271,7 +281,7 @@ app.post('/generate', async (req, res) => {
           if (part.inlineData && part.inlineData.data) {
             const mimeType = part.inlineData.mimeType || 'image/png';
             imageUrl = `data:${mimeType};base64,${part.inlineData.data}`;
-            console.log(`🖼️ Image extracted successfully using key ${keyIndex + 1}`);
+            console.log(`Image extracted successfully using key ${keyIndex + 1}`);
             break;
           }
         }
@@ -287,7 +297,8 @@ app.post('/generate', async (req, res) => {
         imageUrl: imageUrl,
         data: [{ url: imageUrl }],
         images: [imageUrl],
-        prompt: finalPrompt,
+        prompt: prompt,
+        sizeRatio: sizeRatio,
         processingTime: processingTime,
         generated_at: new Date().toISOString(),
         keyInfo: {
@@ -305,7 +316,7 @@ app.post('/generate', async (req, res) => {
     
   } catch (error) {
     const processingTime = Date.now() - startTime;
-    console.error('❌ Single image generation failed:', error.message);
+    console.error('Single image generation failed:', error.message);
     
     const status = keyRotator.getStatus();
     res.status(500).json({ 
@@ -317,127 +328,7 @@ app.post('/generate', async (req, res) => {
   }
 });
 
-// 🎯 STEP 8: Enhanced Multiple Image Generation
-app.post('/generate-multiple', async (req, res) => {
-  const startTime = Date.now();
-  const { prompt, style, count = 2 } = req.body;
-  
-  console.log('📝 Multiple images request:', { 
-    prompt: prompt?.substring(0, 50) + '...', 
-    style,
-    count,
-    timestamp: new Date().toISOString()
-  });
-  
-  if (!prompt || prompt.trim() === '') {
-    return res.status(400).json({ 
-      success: false,
-      error: 'Prompt is required'
-    });
-  }
-
-  const maxCount = 3;
-  const imageCount = Math.min(parseInt(count), maxCount);
-  const images = [];
-  const errors = [];
-  const usedKeys = [];
-
-  console.log(`🎨 Starting generation of ${imageCount} images with multi-key system...`);
-
-  for (let i = 0; i < imageCount; i++) {
-    try {
-      const variations = [
-        'high quality, detailed',
-        'artistic style, creative',
-        'unique perspective, beautiful'
-      ];
-      
-      const variation = variations[i] || `creative variation ${i + 1}`;
-      const finalPrompt = style 
-        ? `${prompt.trim()}, ${style.trim()}, ${variation}` 
-        : `${prompt.trim()}, ${variation}`;
-
-      console.log(`🎨 Generating image ${i + 1}/${imageCount}...`);
-      
-      // Add delay between requests
-      if (i > 0) {
-        console.log(`⏳ Waiting 3 seconds before generating image ${i + 1}...`);
-        await new Promise(resolve => setTimeout(resolve, 3000));
-      }
-      
-      const { result, keyIndex } = await generateWithAutoFailover(finalPrompt, style);
-      usedKeys.push(keyIndex + 1);
-      
-      // Extract image
-      let imageFound = false;
-      if (result.candidates && result.candidates.length > 0) {
-        const candidate = result.candidates[0];
-        
-        if (candidate.content && candidate.content.parts) {
-          for (const part of candidate.content.parts) {
-            if (part.inlineData && part.inlineData.data) {
-              const mimeType = part.inlineData.mimeType || 'image/png';
-              const imageUrl = `data:${mimeType};base64,${part.inlineData.data}`;
-              images.push(imageUrl);
-              imageFound = true;
-              console.log(`✅ Image ${i + 1} generated successfully using key ${keyIndex + 1}`);
-              break;
-            }
-          }
-        }
-      }
-
-      if (!imageFound) {
-        const errorMsg = `Image ${i + 1}: No image data found`;
-        errors.push(errorMsg);
-        console.log(`❌ ${errorMsg}`);
-      }
-
-    } catch (error) {
-      const errorMsg = `Image ${i + 1}: ${error.message}`;
-      console.error(`❌ Error generating image ${i + 1}:`, error.message);
-      errors.push(errorMsg);
-    }
-    
-    console.log(`📊 Progress: ${i + 1}/${imageCount} attempts completed, ${images.length} successful`);
-  }
-
-  const processingTime = Date.now() - startTime;
-  const status = keyRotator.getStatus();
-  
-  console.log(`🎯 Final result: ${images.length}/${imageCount} images generated in ${processingTime}ms`);
-
-  const response = {
-    success: images.length > 0,
-    data: images.map(url => ({ url })),
-    images: images,
-    generated: images.length,
-    requested: imageCount,
-    processingTime: processingTime,
-    generated_at: new Date().toISOString(),
-    keyInfo: {
-      usedKeys: usedKeys,
-      totalKeys: status.totalKeys,
-      remainingCapacity: status.remainingCapacity
-    }
-  };
-
-  if (errors.length > 0) {
-    response.errors = errors;
-    response.message = `Generated ${images.length} out of ${imageCount} requested images`;
-  }
-
-  if (images.length > 0) {
-    res.status(200).json(response);
-  } else {
-    res.status(500).json({
-      ...response,
-      error: 'Failed to generate any images. All API keys may be exhausted.'
-    });
-  }
-});
-
-// 🎯 STEP 9: Key Status Monitoring Endpoint
+// Key Status Monitoring Endpoint
 app.get('/key-status', (req, res) => {
   const status = keyRotator.getStatus();
   const keyDetails = keyRotator.keyHealth.map((k, i) => ({
@@ -455,7 +346,7 @@ app.get('/key-status', (req, res) => {
   });
 });
 
-// 🎯 STEP 10: Reset Endpoint for Testing
+// Reset Endpoint for Testing
 app.post('/reset-keys', (req, res) => {
   keyRotator.resetAllKeys();
   
@@ -468,7 +359,7 @@ app.post('/reset-keys', (req, res) => {
 
 // Global error handling
 app.use((error, req, res, next) => {
-  console.error('❌ Unhandled error:', error);
+  console.error('Unhandled error:', error);
   res.status(500).json({
     success: false,
     error: 'Internal server error'
@@ -480,18 +371,18 @@ app.use('*', (req, res) => {
   res.status(404).json({
     success: false,
     error: 'Endpoint not found',
-    availableEndpoints: ['/', '/health', '/generate', '/generate-multiple', '/key-status', '/reset-keys']
+    availableEndpoints: ['/', '/health', '/generate', '/key-status', '/reset-keys']
   });
 });
 
 // Start server
 app.listen(PORT, () => {
-  console.log(`🚀 Gemini Multi-Key Backend running on port ${PORT}`);
-  console.log(`📊 Loaded ${API_KEYS.length} API keys`);
-  console.log(`📈 Total daily capacity: ${API_KEYS.length * 95} images`);
-  console.log(`🔗 Health check: http://localhost:${PORT}/health`);
-  console.log(`📊 Key status: http://localhost:${PORT}/key-status`);
+  console.log(`Gemini Multi-Key Backend running on port ${PORT}`);
+  console.log(`Loaded ${API_KEYS.length} API keys`);
+  console.log(`Total daily capacity: ${API_KEYS.length * 95} images`);
+  console.log(`Health check: http://localhost:${PORT}/health`);
+  console.log(`Key status: http://localhost:${PORT}/key-status`);
   
   const status = keyRotator.getStatus();
-  console.log(`🎯 Current capacity: ${status.remainingCapacity} images remaining`);
+  console.log(`Current capacity: ${status.remainingCapacity} images remaining`);
 });
