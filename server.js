@@ -1,485 +1,794 @@
-const express = require('express');
-const cors = require('cors');
-const dotenv = require('dotenv');
-const { GoogleGenAI } = require('@google/genai');
+// Configuration
+const CONFIG = {
+    API_BASE_URL: 'https://gemini-backend-a2fl.onrender.com',
+    MAX_PROMPT_LENGTH: 2000,
+    LOADING_MESSAGES: [
+        'Creating your masterpiece...',
+        'Analyzing your vision...',
+        'Painting with digital brushes...',
+        'Channeling artistic inspiration...',
+        'Crafting visual magic...',
+        'Bringing your vision to life...',
+        'Weaving pixels into art...',
+        'Transforming words into images...',
+        'Adding finishing touches...'
+    ]
+};
 
-dotenv.config();
+// DOM Elements
+const DOM = {
+    imageForm: null,
+    promptInput: null,
+    sizeRadios: null,
+    generateBtn: null,
+    loadingContainer: null,
+    loadingMessage: null,
+    progressFill: null,
+    progressPercent: null,
+    resultsContainer: null,
+    charCounter: null,
+    charCount: null,
+    headerStats: null
+};
 
-const app = express();
-const PORT = process.env.PORT || 3000;
+// State
+const state = {
+    isGenerating: false,
+    loadingMessageIndex: 0,
+    progressInterval: null,
+    selectedSizeRatio: '1:1'
+};
 
-// CORS Configuration
-app.use(cors({
-    origin: [
-        'https://ddmalarfun.net',
-        'http://localhost:3000',
-        '*'
-    ],
-    methods: ['GET', 'POST', 'OPTIONS'],
-    credentials: true,
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
-}));
+// Initialize DOM elements safely
+function initializeDOM() {
+    try {
+        DOM.imageForm = document.getElementById('imageForm');
+        DOM.promptInput = document.getElementById('prompt');
+        DOM.sizeRadios = document.querySelectorAll('input[name="sizeRatio"]');
+        DOM.generateBtn = document.getElementById('generateBtn');
+        DOM.loadingContainer = document.getElementById('loadingContainer');
+        DOM.loadingMessage = document.getElementById('loadingMessage');
+        DOM.progressFill = document.getElementById('progressFill');
+        DOM.progressPercent = document.getElementById('progressPercent');
+        DOM.resultsContainer = document.getElementById('resultsContainer');
+        DOM.charCounter = document.getElementById('charCounter');
+        DOM.charCount = document.getElementById('charCount');
+        DOM.headerStats = document.getElementById('headerStats');
 
-app.use(express.json({ limit: '10mb' }));
-
-// API Keys Array Setup
-const API_KEYS = [
-    process.env.GEMINI_API_KEY_1,
-    process.env.GEMINI_API_KEY_2,
-    process.env.GEMINI_API_KEY_3,
-    process.env.GEMINI_API_KEY_4,
-    process.env.GEMINI_API_KEY_5,
-    process.env.GEMINI_API_KEY_6,
-    process.env.GEMINI_API_KEY_7,
-    process.env.GEMINI_API_KEY_8,
-    process.env.GEMINI_API_KEY_9,
-    process.env.GEMINI_API_KEY_10
-].filter(key => key);
-
-// Smart API Key Rotator Class
-class APIKeyRotator {
-    constructor(apiKeys) {
-        this.apiKeys = apiKeys;
-        this.currentIndex = 0;
-        this.keyHealth = apiKeys.map((key, index) => ({
-            key: key,
-            index: index,
-            isHealthy: true,
-            usageCount: 0,
-            lastUsed: null,
-            errorCount: 0,
-            cooldownUntil: null
-        }));
-    }
-
-    getNextAvailableKey() {
-        const now = Date.now();
-        let attempts = 0;
-        const startIndex = this.currentIndex;
-
-        while (attempts < this.apiKeys.length) {
-            const keyInfo = this.keyHealth[this.currentIndex];
-
-            if (keyInfo.isHealthy &&
-                keyInfo.usageCount < 95 &&
-                (!keyInfo.cooldownUntil || keyInfo.cooldownUntil < now)) {
-
-                keyInfo.usageCount++;
-                keyInfo.lastUsed = now;
-
-                const selectedKey = {
-                    key: keyInfo.key,
-                    index: this.currentIndex
-                };
-
-                this.currentIndex = (this.currentIndex + 1) % this.apiKeys.length;
-                return selectedKey;
-            }
-
-            this.currentIndex = (this.currentIndex + 1) % this.apiKeys.length;
-            attempts++;
-
-            if (this.currentIndex === startIndex && attempts > 0) {
-                break;
-            }
-        }
-
-        return null;
-    }
-
-    markKeyExhausted(keyIndex, cooldownMinutes = 60) {
-        if (keyIndex >= 0 && keyIndex < this.keyHealth.length) {
-            this.keyHealth[keyIndex].isHealthy = false;
-            this.keyHealth[keyIndex].cooldownUntil = Date.now() + (cooldownMinutes * 60 * 1000);
-            this.keyHealth[keyIndex].errorCount++;
-            console.log(`Key ${keyIndex + 1} marked as exhausted (cooldown: ${cooldownMinutes}min)`);
-        }
-    }
-
-    resetAllKeys() {
-        this.keyHealth.forEach(keyInfo => {
-            keyInfo.isHealthy = true;
-            keyInfo.usageCount = 0;
-            keyInfo.cooldownUntil = null;
-            keyInfo.errorCount = 0;
-        });
-        console.log('All API keys reset for new day');
-    }
-
-    getStatus() {
-        const now = Date.now();
-        const healthyKeys = this.keyHealth.filter(k =>
-            k.isHealthy && (!k.cooldownUntil || k.cooldownUntil < now)
-        ).length;
-
-        const totalUsage = this.keyHealth.reduce((sum, k) => sum + k.usageCount, 0);
-        const totalCapacity = this.apiKeys.length * 95;
-        const remainingCapacity = totalCapacity - totalUsage;
-
-        return {
-            totalKeys: this.apiKeys.length,
-            healthyKeys: healthyKeys,
-            totalUsage: totalUsage,
-            remainingCapacity: remainingCapacity,
-            capacityPercentage: Math.round((remainingCapacity / totalCapacity) * 100)
-        };
+        console.log('✅ DOM elements initialized successfully');
+        return true;
+    } catch (error) {
+        console.error('❌ Failed to initialize DOM elements:', error);
+        return false;
     }
 }
 
-const keyRotator = new APIKeyRotator(API_KEYS);
-console.log(`Initialized with ${API_KEYS.length} API keys`);
+// Utility functions
+const utils = {
+    debounce(func, wait) {
+        let timeout;
+        return function executedFunction(...args) {
+            const later = () => {
+                clearTimeout(timeout);
+                func(...args);
+            };
+            clearTimeout(timeout);
+            timeout = setTimeout(later, wait);
+        };
+    },
 
-// ENHANCED: Generation Function with Updated Model
-async function generateWithAutoFailover(prompt, sizeRatio, maxAttempts = 3) {
-    let attempt = 0;
+    isMobile() {
+        return window.innerWidth <= 768;
+    },
 
-    while (attempt < maxAttempts) {
-        const keySelection = keyRotator.getNextAvailableKey();
+    getInputValue(element, fallback = '') {
+        if (!element) {
+            console.warn('⚠️ Element not found, returning fallback value');
+            return fallback;
+        }
+        return (element.value || '').trim();
+    },
 
-        if (!keySelection) {
-            throw new Error('All API keys exhausted. Please try again tomorrow at 1:30 PM IST.');
+    getSelectedSizeRatio() {
+        const checkedRadio = document.querySelector('input[name="sizeRatio"]:checked');
+        return checkedRadio ? checkedRadio.value : '1:1';
+    }
+};
+
+// Character counter
+const characterCounter = {
+    init() {
+        if (!DOM.promptInput || !DOM.charCount) {
+            console.error('❌ Character counter: Required elements not found');
+            return;
+        }
+
+        this.updateCounter();
+        DOM.promptInput.addEventListener('input', utils.debounce(() => {
+            this.updateCounter();
+            this.autoResize();
+        }, 100));
+    },
+
+    updateCounter() {
+        if (!DOM.promptInput || !DOM.charCount || !DOM.charCounter) return;
+
+        const currentLength = utils.getInputValue(DOM.promptInput).length;
+        const maxLength = CONFIG.MAX_PROMPT_LENGTH;
+
+        DOM.charCount.textContent = currentLength;
+        DOM.charCounter.classList.remove('warning', 'error');
+
+        if (currentLength > maxLength) {
+            DOM.charCounter.classList.add('error');
+        } else if (currentLength > maxLength * 0.8) {
+            DOM.charCounter.classList.add('warning');
+        }
+    },
+
+    autoResize() {
+        if (!DOM.promptInput) return;
+        DOM.promptInput.style.height = 'auto';
+        DOM.promptInput.style.height = (DOM.promptInput.scrollHeight) + 'px';
+    }
+};
+
+// Size ratio handler
+const sizeRatioHandler = {
+    init() {
+        if (!DOM.sizeRadios) return;
+
+        DOM.sizeRadios.forEach(radio => {
+            radio.addEventListener('change', (e) => {
+                state.selectedSizeRatio = e.target.value;
+                console.log('📐 Size ratio changed to:', state.selectedSizeRatio);
+            });
+        });
+
+        // Set initial state
+        state.selectedSizeRatio = utils.getSelectedSizeRatio();
+        console.log('📐 Initial size ratio:', state.selectedSizeRatio);
+    }
+};
+
+// Enhanced Loading manager with better progress
+const loadingManager = {
+    messageInterval: null,
+    progressInterval: null,
+
+    show() {
+        if (!DOM.loadingContainer) return;
+        DOM.loadingContainer.classList.add('show');
+        this.startMessageRotation();
+        this.startProgressAnimation();
+    },
+
+    hide() {
+        if (!DOM.loadingContainer) return;
+        DOM.loadingContainer.classList.remove('show');
+        this.stopMessageRotation();
+        this.stopProgressAnimation();
+    },
+
+    startMessageRotation() {
+        this.stopMessageRotation();
+        state.loadingMessageIndex = 0;
+        this.messageInterval = setInterval(() => {
+            if (DOM.loadingMessage) {
+                DOM.loadingMessage.textContent = CONFIG.LOADING_MESSAGES[state.loadingMessageIndex];
+                state.loadingMessageIndex = (state.loadingMessageIndex + 1) % CONFIG.LOADING_MESSAGES.length;
+            }
+        }, 3000);
+    },
+
+    stopMessageRotation() {
+        if (this.messageInterval) {
+            clearInterval(this.messageInterval);
+            this.messageInterval = null;
+        }
+    },
+
+    startProgressAnimation() {
+        if (!DOM.progressFill || !DOM.progressPercent) return;
+        
+        let progress = 0;
+        this.progressInterval = setInterval(() => {
+            if (!DOM.loadingContainer || !DOM.loadingContainer.classList.contains('show')) {
+                clearInterval(this.progressInterval);
+                return;
+            }
+            
+            // More realistic progress simulation
+            if (progress < 30) {
+                progress += Math.random() * 8 + 2;
+            } else if (progress < 60) {
+                progress += Math.random() * 4 + 1;
+            } else if (progress < 90) {
+                progress += Math.random() * 2 + 0.5;
+            } else if (progress < 95) {
+                progress += Math.random() * 0.5;
+            }
+
+            progress = Math.min(progress, 95);
+            
+            DOM.progressFill.style.width = `${progress}%`;
+            DOM.progressPercent.textContent = `${Math.round(progress)}%`;
+        }, 500);
+    },
+
+    stopProgressAnimation() {
+        if (this.progressInterval) {
+            clearInterval(this.progressInterval);
+            this.progressInterval = null;
+        }
+        if (DOM.progressFill && DOM.progressPercent) {
+            DOM.progressFill.style.width = '0%';
+            DOM.progressPercent.textContent = '0%';
+        }
+    }
+};
+
+// Message manager
+const messageManager = {
+    show(message, type = 'info') {
+        if (!DOM.resultsContainer) return;
+
+        this.clear();
+        const messageDiv = document.createElement('div');
+        messageDiv.className = `message ${type}`;
+        messageDiv.textContent = message;
+        DOM.resultsContainer.insertBefore(messageDiv, DOM.resultsContainer.firstChild);
+
+        setTimeout(() => {
+            if (messageDiv.parentNode) {
+                messageDiv.remove();
+            }
+        }, 6000);
+    },
+
+    clear() {
+        document.querySelectorAll('.message').forEach(el => el.remove());
+    }
+};
+
+// Image manager
+const imageManager = {
+    clearPreviousImages() {
+        if (!DOM.resultsContainer) return;
+        const imageResults = DOM.resultsContainer.querySelectorAll('.image-result');
+        imageResults.forEach(result => result.remove());
+        messageManager.clear();
+        console.log('✅ Previous images cleared');
+    }
+};
+
+// Enhanced Image processor with proper size ratio handling
+const imageProcessor = {
+    async processImage(imgElement, targetRatio) {
+        return new Promise((resolve) => {
+            // If no target ratio specified, return original
+            if (!targetRatio) {
+                resolve(imgElement.src);
+                return;
+            }
+
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+
+            // Define exact aspect ratios
+            const ratios = {
+                '1:1': 1,
+                '4:3': 4/3,
+                '16:9': 16/9,
+                '9:16': 9/16
+            };
+
+            const targetAspectRatio = ratios[targetRatio];
+            if (!targetAspectRatio) {
+                resolve(imgElement.src);
+                return;
+            }
+
+            // Wait for image to load
+            const processLoadedImage = () => {
+                const originalWidth = imgElement.naturalWidth;
+                const originalHeight = imgElement.naturalHeight;
+                
+                if (originalWidth === 0 || originalHeight === 0) {
+                    resolve(imgElement.src);
+                    return;
+                }
+
+                const originalAspectRatio = originalWidth / originalHeight;
+
+                // Calculate crop dimensions
+                let cropWidth, cropHeight, offsetX = 0, offsetY = 0;
+
+                if (originalAspectRatio > targetAspectRatio) {
+                    // Image is wider than target - crop sides
+                    cropHeight = originalHeight;
+                    cropWidth = originalHeight * targetAspectRatio;
+                    offsetX = (originalWidth - cropWidth) / 2;
+                } else {
+                    // Image is taller than target - crop top/bottom
+                    cropWidth = originalWidth;
+                    cropHeight = originalWidth / targetAspectRatio;
+                    offsetY = (originalHeight - cropHeight) / 2;
+                }
+
+                // Set canvas size based on target ratio (max 1024px on longer side)
+                const maxSize = 1024;
+                if (targetAspectRatio >= 1) {
+                    // Landscape or square
+                    canvas.width = maxSize;
+                    canvas.height = maxSize / targetAspectRatio;
+                } else {
+                    // Portrait
+                    canvas.width = maxSize * targetAspectRatio;
+                    canvas.height = maxSize;
+                }
+
+                // Draw cropped and resized image
+                ctx.drawImage(
+                    imgElement,
+                    offsetX, offsetY, cropWidth, cropHeight,
+                    0, 0, canvas.width, canvas.height
+                );
+
+                const processedImageUrl = canvas.toDataURL('image/png', 0.9);
+                console.log(`✅ Image processed: ${targetRatio} (${canvas.width}x${canvas.height})`);
+                resolve(processedImageUrl);
+            };
+
+            if (imgElement.complete && imgElement.naturalWidth > 0) {
+                processLoadedImage();
+            } else {
+                imgElement.onload = processLoadedImage;
+                imgElement.onerror = () => {
+                    console.warn('⚠️ Image processing failed - using original');
+                    resolve(imgElement.src);
+                };
+            }
+        });
+    }
+};
+
+// Enhanced Image generator with better size ratio handling
+const imageGenerator = {
+    async generate() {
+        console.log('🔄 Generate function called');
+
+        if (!DOM.promptInput) {
+            console.error('❌ Required DOM elements not found');
+            messageManager.show('⚠️ Page not loaded properly. Please refresh the page.', 'error');
+            return;
+        }
+
+        const prompt = utils.getInputValue(DOM.promptInput);
+        const sizeRatio = utils.getSelectedSizeRatio();
+
+        console.log('📝 Input values:', {
+            prompt: prompt ? `"${prompt.substring(0, 30)}..."` : 'EMPTY',
+            promptLength: prompt.length,
+            sizeRatio: sizeRatio
+        });
+
+        // Enhanced validation
+        if (!prompt || prompt.length === 0) {
+            console.warn('⚠️ Empty prompt detected');
+            messageManager.show('✨ Please describe your image to get started!', 'error');
+            if (DOM.promptInput) {
+                DOM.promptInput.focus();
+                DOM.promptInput.style.borderColor = 'var(--error)';
+                setTimeout(() => {
+                    DOM.promptInput.style.borderColor = '';
+                }, 3000);
+            }
+            return;
+        }
+
+        if (prompt.length > CONFIG.MAX_PROMPT_LENGTH) {
+            console.warn('⚠️ Prompt too long:', prompt.length);
+            messageManager.show(`📝 Please keep your description under ${CONFIG.MAX_PROMPT_LENGTH} characters`, 'error');
+            if (DOM.promptInput) {
+                DOM.promptInput.focus();
+            }
+            return;
+        }
+
+        console.log('✅ Validation passed, starting generation');
+        this.setGeneratingState(true);
+
+        try {
+            console.log('🚀 Making API request with size ratio:', sizeRatio);
+
+            const response = await fetch(`${CONFIG.API_BASE_URL}/generate`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json'
+                },
+                body: JSON.stringify({ 
+                    prompt: prompt, 
+                    sizeRatio: sizeRatio 
+                }),
+            });
+
+            console.log('📡 API Response status:', response.status);
+
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`);
+            }
+
+            const data = await response.json();
+            console.log('📦 API Response data received');
+
+            if (data.success && (data.imageUrl || data.images)) {
+                const imageUrl = data.imageUrl || data.images[0];
+                await this.displayImage(imageUrl, prompt, { ...data, sizeRatio });
+                messageManager.show('🎨 Your beautiful image is ready!', 'success');
+
+                // Update header stats if available
+                if (DOM.headerStats && data.keyInfo) {
+                    this.updateHeaderStats(data.keyInfo);
+                }
+
+                setTimeout(() => {
+                    if (DOM.resultsContainer) {
+                        DOM.resultsContainer.scrollIntoView({
+                            behavior: 'smooth',
+                            block: 'center'
+                        });
+                    }
+                }, 300);
+            } else {
+                throw new Error(data.error || 'No image generated');
+            }
+
+        } catch (error) {
+            console.error('❌ Generation failed:', error);
+            let errorMessage = '🚫 Something went wrong. Please try again!';
+
+            if (error.message.includes('quota') || error.message.includes('429')) {
+                errorMessage = '⏰ We\'re at capacity right now. Please try again in a few minutes!';
+            } else if (error.message.includes('fetch') || error.message.includes('network')) {
+                errorMessage = '🌐 Connection issue. Please check your internet and try again!';
+            }
+
+            messageManager.show(errorMessage, 'error');
+        } finally {
+            this.setGeneratingState(false);
+        }
+    },
+
+    async displayImage(imageUrl, prompt, data) {
+        console.log('🖼️ Displaying image with ratio:', data.sizeRatio);
+
+        if (!DOM.resultsContainer) {
+            console.error('❌ Results container not found');
+            return;
+        }
+
+        imageManager.clearPreviousImages();
+
+        const imageResult = document.createElement('div');
+        imageResult.className = 'image-result';
+
+        const img = document.createElement('img');
+        img.src = imageUrl;
+        img.alt = `Generated Image: ${prompt}`;
+        img.className = 'generated-image';
+        img.loading = 'lazy';
+
+        // Enhanced image loading with proper ratio processing
+        img.onload = async () => {
+            try {
+                console.log('🖼️ Processing image for size ratio:', data.sizeRatio);
+                const processedUrl = await imageProcessor.processImage(img, data.sizeRatio);
+                if (processedUrl !== img.src) {
+                    img.src = processedUrl;
+                    console.log('✅ Image processed and updated');
+                } else {
+                    console.log('✅ Image loaded (no processing needed)');
+                }
+            } catch (error) {
+                console.warn('⚠️ Image processing failed:', error);
+            }
+        };
+
+        img.onerror = () => {
+            console.error('❌ Image failed to load');
+            messageManager.show('Failed to load generated image', 'error');
+        };
+
+        const ratioBadge = document.createElement('div');
+        ratioBadge.className = 'ratio-badge';
+        ratioBadge.textContent = `${data.sizeRatio || '1:1'} ✓`;
+
+        const downloadBtn = document.createElement('button');
+        downloadBtn.className = 'download-btn';
+        downloadBtn.innerHTML = '📥 Download Image';
+        downloadBtn.onclick = () => this.downloadImage(img.src, data.sizeRatio, prompt);
+
+        const imageInfo = document.createElement('div');
+        imageInfo.className = 'image-info';
+        imageInfo.innerHTML = this.generateImageInfo(data, prompt);
+
+        imageResult.appendChild(ratioBadge);
+        imageResult.appendChild(img);
+        imageResult.appendChild(downloadBtn);
+        imageResult.appendChild(imageInfo);
+
+        DOM.resultsContainer.appendChild(imageResult);
+        console.log('✅ Image result displayed');
+    },
+
+    generateImageInfo(data, prompt) {
+        const lines = [];
+        lines.push(`<strong>Format:</strong> ${data.sizeRatio || '1:1'}`);
+        if (data.processingTime) {
+            lines.push(`<strong>Generated in:</strong> ${data.processingTime}ms`);
+        }
+        if (data.keyInfo && data.keyInfo.usedKey) {
+            lines.push(`<strong>Key:</strong> ${data.keyInfo.usedKey}`);
+        }
+        if (data.model) {
+            lines.push(`<strong>Model:</strong> ${data.model}`);
+        }
+        return lines.join(' • ');
+    },
+
+    downloadImage(dataUrl, sizeRatio, prompt) {
+        try {
+            const link = document.createElement('a');
+            link.href = dataUrl;
+            const timestamp = new Date().toISOString().slice(0, 19).replace(/[:-]/g, '');
+            const filename = `ai-image-${sizeRatio || 'standard'}-${timestamp}.png`;
+            link.download = filename;
+            link.style.display = 'none';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+
+            messageManager.show(`📥 Downloaded in ${sizeRatio || 'standard'} format!`, 'success');
+            console.log('✅ Download initiated:', filename);
+        } catch (error) {
+            console.error('❌ Download failed:', error);
+            messageManager.show('⚠️ Download failed. Try right-clicking the image and selecting "Save As".', 'error');
+        }
+    },
+
+    updateHeaderStats(keyInfo) {
+        if (!DOM.headerStats) return;
+        
+        const dailyQuota = DOM.headerStats.querySelector('#dailyQuota');
+        if (dailyQuota && keyInfo.remainingCapacity !== undefined) {
+            dailyQuota.textContent = keyInfo.remainingCapacity;
+        }
+    },
+
+    setGeneratingState(isGenerating) {
+        console.log('⚙️ Setting generating state:', isGenerating);
+        state.isGenerating = isGenerating;
+
+        if (DOM.generateBtn) {
+            DOM.generateBtn.disabled = isGenerating;
+        }
+
+        if (isGenerating) {
+            loadingManager.show();
+        } else {
+            loadingManager.hide();
+        }
+    }
+};
+
+// Form handler
+const formHandler = {
+    init() {
+        if (!DOM.imageForm || !DOM.generateBtn) {
+            console.error('❌ Form handler: Required elements not found');
+            return;
+        }
+
+        DOM.imageForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            console.log('📋 Form submitted');
+            this.handleGenerate();
+        });
+
+        DOM.generateBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            console.log('🔘 Generate button clicked');
+            this.handleGenerate();
+        });
+
+        console.log('✅ Form handlers initialized');
+    },
+
+    handleGenerate() {
+        if (state.isGenerating) {
+            console.log('⏸️ Generation already in progress, ignoring request');
+            return;
+        }
+
+        console.log('▶️ Starting generation process');
+        imageGenerator.generate();
+    }
+};
+
+// Enhanced keyboard shortcuts
+const keyboardShortcuts = {
+    init() {
+        document.addEventListener('keydown', (e) => {
+            // Ctrl+Enter to generate
+            if (e.key === 'Enter' && e.ctrlKey && !state.isGenerating) {
+                e.preventDefault();
+                console.log('⌨️ Ctrl+Enter pressed');
+                imageGenerator.generate();
+            } 
+            // Escape to clear results
+            else if (e.key === 'Escape') {
+                console.log('⌨️ Escape pressed');
+                messageManager.clear();
+                if (DOM.promptInput && !state.isGenerating) {
+                    DOM.promptInput.focus();
+                }
+            }
+            // Tab navigation enhancement
+            else if (e.key === 'Tab' && !e.shiftKey) {
+                // Enhanced tab navigation logic can be added here
+            }
+        });
+
+        console.log('✅ Keyboard shortcuts initialized');
+    }
+};
+
+// API Health checker
+const healthChecker = {
+    async checkAPIHealth() {
+        try {
+            const response = await fetch(`${CONFIG.API_BASE_URL}/health`);
+            const data = await response.json();
+            
+            if (data.status === 'healthy' && DOM.headerStats) {
+                this.updateHealthStats(data);
+            }
+            
+            return data.status === 'healthy';
+        } catch (error) {
+            console.warn('⚠️ Health check failed:', error.message);
+            return false;
+        }
+    },
+
+    updateHealthStats(healthData) {
+        const dailyQuota = document.querySelector('#dailyQuota');
+        if (dailyQuota && healthData.multiKeyStatus) {
+            dailyQuota.textContent = healthData.multiKeyStatus.remainingCapacity || '--';
+        }
+    },
+
+    startHealthChecking() {
+        // Initial check
+        this.checkAPIHealth();
+        
+        // Periodic checks every 5 minutes
+        setInterval(() => {
+            this.checkAPIHealth();
+        }, 300000);
+    }
+};
+
+// Enhanced App initialization
+class AIImageGenerator {
+    constructor() {
+        this.init();
+    }
+
+    async init() {
+        console.log('🎨 AI Image Generator initializing...');
+
+        if (!initializeDOM()) {
+            console.error('❌ Failed to initialize DOM elements');
+            return;
         }
 
         try {
-            console.log(`Attempt ${attempt + 1}: Using key ${keySelection.index + 1}/${API_KEYS.length}`);
-            const ai = new GoogleGenAI({ apiKey: keySelection.key });
+            // Initialize all modules
+            characterCounter.init();
+            sizeRatioHandler.init();
+            formHandler.init();
+            keyboardShortcuts.init();
+            
+            // Start health checking
+            healthChecker.startHealthChecking();
 
-            let finalPrompt = prompt.trim();
-            if (sizeRatio) {
-                const sizeDescription = {
-                    '1:1': 'square format',
-                    '4:3': 'standard landscape format',
-                    '16:9': 'wide landscape format',
-                    '9:16': 'portrait format'
-                };
-                finalPrompt += `, ${sizeDescription[sizeRatio] || 'standard format'}`;
+            // Focus prompt input
+            if (DOM.promptInput) {
+                DOM.promptInput.focus();
             }
 
-            console.log(`Using model: gemini-2.5-flash-image-preview`);
-            console.log(`Final prompt: ${finalPrompt.substring(0, 100)}...`);
+            // Add visual feedback for interactions
+            this.addVisualFeedback();
 
-            // UPDATED: Using new model gemini-2.5-flash-image-preview
-            const result = await ai.models.generateContent({
-                model: "gemini-2.5-flash-image-preview",  // Updated model
-                contents: [{
-                    parts: [{ text: finalPrompt }]
-                }],
-                config: {
-                    responseModalities: ["IMAGE", "TEXT"]
-                }
-            });
-
-            console.log(`Success with key ${keySelection.index + 1}`);
-
-            // ENHANCED: Log full response structure for debugging
-            console.log('Response structure:', JSON.stringify({
-                hasCandidates: !!result.candidates,
-                candidatesLength: result.candidates?.length || 0,
-                firstCandidateKeys: result.candidates?.[0] ? Object.keys(result.candidates[0]) : [],
-                contentKeys: result.candidates?.[0]?.content ? Object.keys(result.candidates[0].content) : [],
-                partsLength: result.candidates?.[0]?.content?.parts?.length || 0
-            }, null, 2));
-
-            return { result, keyIndex: keySelection.index };
-
+            console.log('✅ AI Image Generator initialized successfully');
+            console.log('🚀 Enhanced UI/UX with size ratio fixes enabled');
+            
         } catch (error) {
-            console.error(`Key ${keySelection.index + 1} failed:`, error.message);
-
-            if (error.message.includes('429') ||
-                error.message.includes('quota') ||
-                error.message.includes('RESOURCE_EXHAUSTED')) {
-
-                keyRotator.markKeyExhausted(keySelection.index);
-                console.log(`Switching to next available key...`);
-                attempt++;
-
-                if (attempt < maxAttempts) {
-                    const delay = attempt * 1000;
-                    console.log(`Waiting ${delay}ms before next attempt...`);
-                    await new Promise(resolve => setTimeout(resolve, delay));
-                }
-            } else {
-                attempt++;
-            }
+            console.error('❌ Initialization failed:', error);
         }
     }
 
-    throw new Error(`Image generation failed after ${maxAttempts} attempts with different keys`);
+    addVisualFeedback() {
+        // Add ripple effect to buttons
+        const buttons = document.querySelectorAll('.generate-btn, .download-btn, .size-card');
+        buttons.forEach(button => {
+            button.addEventListener('click', this.createRipple);
+        });
+    }
+
+    createRipple(e) {
+        const button = e.currentTarget;
+        const ripple = document.createElement('span');
+        const rect = button.getBoundingClientRect();
+        const size = Math.max(rect.width, rect.height);
+        const x = e.clientX - rect.left - size / 2;
+        const y = e.clientY - rect.top - size / 2;
+        
+        ripple.style.cssText = `
+            position: absolute;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.3);
+            width: ${size}px;
+            height: ${size}px;
+            left: ${x}px;
+            top: ${y}px;
+            animation: ripple 0.6s ease-out;
+            pointer-events: none;
+            z-index: 1000;
+        `;
+        
+        button.style.position = 'relative';
+        button.style.overflow = 'hidden';
+        button.appendChild(ripple);
+        
+        setTimeout(() => {
+            ripple.remove();
+        }, 600);
+    }
 }
 
-// Root endpoint
-app.get('/', (req, res) => {
-    const status = keyRotator.getStatus();
-    res.json({
-        message: 'Gemini Backend - Multi-Key AI Image Generator',
-        status: 'Running',
-        model: 'gemini-2.5-flash-image-preview',  // Updated model info
-        keyInfo: {
-            totalKeys: status.totalKeys,
-            healthyKeys: status.healthyKeys,
-            remainingCapacity: status.remainingCapacity,
-            capacityPercentage: status.capacityPercentage + '%'
-        },
-        cors: 'Enabled for ddmalarfun.net',
-        timestamp: new Date().toISOString(),
-        version: '3.1.0 - Updated Model Support',  // Updated version
-        maxPromptLength: 2000  // Added max prompt info
-    });
-});
-
-// Health check endpoint
-app.get('/health', (req, res) => {
-    console.log('Health check requested from:', req.get('Origin') || 'Unknown');
-    const status = keyRotator.getStatus();
-
-    res.status(200).json({
-        status: 'healthy',
-        model: 'gemini-2.5-flash-image-preview',
-        uptime: process.uptime(),
-        timestamp: new Date().toISOString(),
-        multiKeyStatus: {
-            totalKeys: status.totalKeys,
-            healthyKeys: status.healthyKeys,
-            totalUsage: status.totalUsage,
-            remainingCapacity: status.remainingCapacity,
-            capacityPercentage: status.capacityPercentage + '%'
-        },
-        cors: 'Enabled',
-        allowedOrigin: 'https://ddmalarfun.net',
-        maxPromptLength: 2000
-    });
-});
-
-// COMPLETELY FIXED: Enhanced Image Generation with Multiple Extraction Methods
-app.post('/generate', async (req, res) => {
-    const startTime = Date.now();
-    const { prompt, sizeRatio } = req.body;
-
-    console.log('Single image request:', {
-        prompt: prompt?.substring(0, 50) + '...',
-        promptLength: prompt?.length || 0,
-        sizeRatio,
-        model: 'gemini-2.5-flash-image-preview',
-        timestamp: new Date().toISOString()
-    });
-
-    if (!prompt || prompt.trim() === '') {
-        return res.status(400).json({
-            success: false,
-            error: 'Prompt is required and cannot be empty'
-        });
+// Add ripple animation CSS
+const rippleStyle = document.createElement('style');
+rippleStyle.textContent = `
+    @keyframes ripple {
+        0% {
+            transform: scale(0);
+            opacity: 1;
+        }
+        100% {
+            transform: scale(2);
+            opacity: 0;
+        }
     }
+`;
+document.head.appendChild(rippleStyle);
 
-    // ENHANCED: Validate prompt length (2000 characters)
-    if (prompt.length > 2000) {
-        return res.status(400).json({
-            success: false,
-            error: 'Prompt must be 2000 characters or less',
-            promptLength: prompt.length,
-            maxLength: 2000
+// Start app with enhanced DOM ready detection
+function startApp() {
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', () => {
+            console.log('📄 DOM Content Loaded');
+            new AIImageGenerator();
         });
+    } else {
+        console.log('📄 DOM Already Ready');
+        new AIImageGenerator();
     }
+}
 
-    try {
-        const { result, keyIndex } = await generateWithAutoFailover(prompt, sizeRatio);
-
-        // ENHANCED: Multiple extraction methods with detailed logging
-        let imageUrl = null;
-        let extractionMethod = 'none';
-
-        console.log('Starting image extraction...');
-
-        // Method 1: Standard extraction from result.candidates[0]
-        if (result?.candidates?.length > 0) {
-            const candidate = result.candidates[0];
-
-            console.log('Candidate structure:', {
-                hasContent: !!candidate.content,
-                hasParts: !!candidate.content?.parts,
-                partsCount: candidate.content?.parts?.length || 0
-            });
-
-            if (candidate?.content?.parts && candidate.content.parts.length > 0) {
-                for (let i = 0; i < candidate.content.parts.length; i++) {
-                    const part = candidate.content.parts[i];
-
-                    console.log(`Part ${i}:`, {
-                        hasInlineData: !!part.inlineData,
-                        hasData: !!part.inlineData?.data,
-                        dataLength: part.inlineData?.data?.length || 0,
-                        mimeType: part.inlineData?.mimeType
-                    });
-
-                    if (part.inlineData?.data) {
-                        const mimeType = part.inlineData.mimeType || 'image/png';
-                        imageUrl = `data:${mimeType};base64,${part.inlineData.data}`;
-                        extractionMethod = `standard-part-${i}`;
-                        console.log(`Image extracted via method: ${extractionMethod}`);
-                        break;
-                    }
-                }
-            }
-        }
-
-        // Method 2: Try direct candidates array access
-        if (!imageUrl && result?.candidates) {
-            console.log('Trying direct candidates access...');
-            const candidates = Array.isArray(result.candidates) ? result.candidates : [result.candidates];
-
-            for (let candIndex = 0; candIndex < candidates.length; candIndex++) {
-                const candidate = candidates[candIndex];
-                if (candidate?.content?.parts) {
-                    for (let partIndex = 0; partIndex < candidate.content.parts.length; partIndex++) {
-                        const part = candidate.content.parts[partIndex];
-                        if (part?.inlineData?.data) {
-                            const mimeType = part.inlineData.mimeType || 'image/png';
-                            imageUrl = `data:${mimeType};base64,${part.inlineData.data}`;
-                            extractionMethod = `direct-cand-${candIndex}-part-${partIndex}`;
-                            console.log(`Image extracted via method: ${extractionMethod}`);
-                            break;
-                        }
-                    }
-                }
-                if (imageUrl) break;
-            }
-        }
-
-        // Method 3: Check for alternative response structures
-        if (!imageUrl) {
-            console.log('Trying alternative structures...');
-            // Check if image data is elsewhere in response
-            if (result?.response?.candidates) {
-                const candidates = result.response.candidates;
-                if (candidates[0]?.content?.parts) {
-                    for (const part of candidates[0].content.parts) {
-                        if (part?.inlineData?.data) {
-                            const mimeType = part.inlineData.mimeType || 'image/png';
-                            imageUrl = `data:${mimeType};base64,${part.inlineData.data}`;
-                            extractionMethod = 'response-candidates';
-                            console.log(`Image extracted via method: ${extractionMethod}`);
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-
-        if (imageUrl) {
-            const processingTime = Date.now() - startTime;
-            const status = keyRotator.getStatus();
-
-            console.log(`Image extracted successfully using key ${keyIndex + 1}, method: ${extractionMethod}, size: ${imageUrl.length} chars`);
-
-            return res.json({
-                success: true,
-                imageUrl: imageUrl,
-                data: [{ url: imageUrl }],
-                images: [imageUrl],
-                prompt: prompt,
-                sizeRatio: sizeRatio,
-                processingTime: processingTime,
-                generated_at: new Date().toISOString(),
-                model: 'gemini-2.5-flash-image-preview',
-                promptLength: prompt.length,
-                keyInfo: {
-                    usedKey: keyIndex + 1,
-                    totalKeys: status.totalKeys,
-                    remainingCapacity: status.remainingCapacity,
-                    extractionMethod: extractionMethod
-                }
-            });
-        }
-
-        // If no image found, log the complete response for debugging
-        console.error('No image found - Complete response structure:');
-        console.error(JSON.stringify(result, null, 2));
-
-        res.status(500).json({
-            success: false,
-            error: 'No image generated in response',
-            debug: {
-                hasCandidates: !!result?.candidates,
-                candidatesLength: result?.candidates?.length || 0,
-                responseKeys: Object.keys(result || {}),
-                extractionMethod: extractionMethod,
-                model: 'gemini-2.5-flash-image-preview'
-            }
-        });
-
-    } catch (error) {
-        const processingTime = Date.now() - startTime;
-        console.error('Single image generation failed:', error.message);
-        const status = keyRotator.getStatus();
-
-        res.status(500).json({
-            success: false,
-            error: error.message,
-            processingTime,
-            keyStatus: status,
-            model: 'gemini-2.5-flash-image-preview'
-        });
-    }
-});
-
-// Key Status Monitoring Endpoint
-app.get('/key-status', (req, res) => {
-    const status = keyRotator.getStatus();
-    const keyDetails = keyRotator.keyHealth.map((k, i) => ({
-        keyNumber: i + 1,
-        isHealthy: k.isHealthy,
-        usageCount: k.usageCount,
-        errorCount: k.errorCount,
-        cooldownUntil: k.cooldownUntil ? new Date(k.cooldownUntil).toLocaleString() : null
-    }));
-
-    res.json({
-        summary: status,
-        keyDetails: keyDetails,
-        model: 'gemini-2.5-flash-image-preview',
-        maxPromptLength: 2000,
-        timestamp: new Date().toISOString()
-    });
-});
-
-// Reset Endpoint for Testing
-app.post('/reset-keys', (req, res) => {
-    keyRotator.resetAllKeys();
-    res.json({
-        success: true,
-        message: 'All API key quotas and statuses reset',
-        newCapacity: keyRotator.getStatus().remainingCapacity,
-        model: 'gemini-2.5-flash-image-preview'
-    });
-});
-
-// Global error handling
-app.use((error, req, res, next) => {
-    console.error('Unhandled error:', error);
-    res.status(500).json({
-        success: false,
-        error: 'Internal server error'
-    });
-});
-
-// 404 handler
-app.use('*', (req, res) => {
-    res.status(404).json({
-        success: false,
-        error: 'Endpoint not found',
-        availableEndpoints: ['/', '/health', '/generate', '/key-status', '/reset-keys']
-    });
-});
-
-// Start server
-app.listen(PORT, () => {
-    console.log(`Gemini Multi-Key Backend running on port ${PORT}`);
-    console.log(`Using model: gemini-2.5-flash-image-preview`);
-    console.log(`Max prompt length: 2000 characters`);
-    console.log(`Loaded ${API_KEYS.length} API keys`);
-    console.log(`Total daily capacity: ${API_KEYS.length * 95} images`);
-    console.log(`Health check: http://localhost:${PORT}/health`);
-    console.log(`Key status: http://localhost:${PORT}/key-status`);
-
-    const status = keyRotator.getStatus();
-    console.log(`Current capacity: ${status.remainingCapacity} images remaining`);
-});
+// Start the application
+startApp();
