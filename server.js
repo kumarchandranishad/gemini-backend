@@ -8,14 +8,11 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Enhanced CORS Configuration
+// CORS Configuration
 app.use(cors({
     origin: [
         'https://ddmalarfun.net',
         'http://localhost:3000',
-        'http://localhost:5000',
-        'http://127.0.0.1:3000',
-        'http://127.0.0.1:5000',
         '*'
     ],
     methods: ['GET', 'POST', 'OPTIONS'],
@@ -39,7 +36,7 @@ const API_KEYS = [
     process.env.GEMINI_API_KEY_10
 ].filter(key => key);
 
-// Enhanced API Key Rotator Class
+// Smart API Key Rotator Class
 class APIKeyRotator {
     constructor(apiKeys) {
         this.apiKeys = apiKeys;
@@ -51,8 +48,7 @@ class APIKeyRotator {
             usageCount: 0,
             lastUsed: null,
             errorCount: 0,
-            cooldownUntil: null,
-            successCount: 0
+            cooldownUntil: null
         }));
     }
 
@@ -91,18 +87,12 @@ class APIKeyRotator {
         return null;
     }
 
-    markKeySuccess(keyIndex) {
-        if (keyIndex >= 0 && keyIndex < this.keyHealth.length) {
-            this.keyHealth[keyIndex].successCount++;
-        }
-    }
-
     markKeyExhausted(keyIndex, cooldownMinutes = 60) {
         if (keyIndex >= 0 && keyIndex < this.keyHealth.length) {
             this.keyHealth[keyIndex].isHealthy = false;
             this.keyHealth[keyIndex].cooldownUntil = Date.now() + (cooldownMinutes * 60 * 1000);
             this.keyHealth[keyIndex].errorCount++;
-            console.log(`🔑 Key ${keyIndex + 1} marked as exhausted (cooldown: ${cooldownMinutes}min)`);
+            console.log(`Key ${keyIndex + 1} marked as exhausted (cooldown: ${cooldownMinutes}min)`);
         }
     }
 
@@ -113,7 +103,7 @@ class APIKeyRotator {
             keyInfo.cooldownUntil = null;
             keyInfo.errorCount = 0;
         });
-        console.log('🔄 All API keys reset for new day');
+        console.log('All API keys reset for new day');
     }
 
     getStatus() {
@@ -123,7 +113,6 @@ class APIKeyRotator {
         ).length;
 
         const totalUsage = this.keyHealth.reduce((sum, k) => sum + k.usageCount, 0);
-        const totalSuccess = this.keyHealth.reduce((sum, k) => sum + k.successCount, 0);
         const totalCapacity = this.apiKeys.length * 95;
         const remainingCapacity = totalCapacity - totalUsage;
 
@@ -131,7 +120,6 @@ class APIKeyRotator {
             totalKeys: this.apiKeys.length,
             healthyKeys: healthyKeys,
             totalUsage: totalUsage,
-            totalSuccess: totalSuccess,
             remainingCapacity: remainingCapacity,
             capacityPercentage: Math.round((remainingCapacity / totalCapacity) * 100)
         };
@@ -139,37 +127,9 @@ class APIKeyRotator {
 }
 
 const keyRotator = new APIKeyRotator(API_KEYS);
-console.log(`🔑 Initialized with ${API_KEYS.length} API keys`);
+console.log(`Initialized with ${API_KEYS.length} API keys`);
 
-// Enhanced Size Ratio Mapping for Better Results
-function enhancePromptWithSizeRatio(prompt, sizeRatio) {
-    const sizeEnhancements = {
-        '1:1': {
-            description: 'square format, centered composition',
-            keywords: 'square aspect ratio, centered, balanced composition'
-        },
-        '4:3': {
-            description: 'standard landscape format, classic proportions',
-            keywords: 'landscape orientation, 4:3 aspect ratio, standard format'
-        },
-        '16:9': {
-            description: 'widescreen cinematic format, panoramic view',
-            keywords: 'cinematic widescreen, 16:9 aspect ratio, panoramic, wide angle'
-        },
-        '9:16': {
-            description: 'portrait format, vertical composition',
-            keywords: 'portrait orientation, vertical composition, 9:16 aspect ratio, mobile format'
-        }
-    };
-
-    const enhancement = sizeEnhancements[sizeRatio];
-    if (!enhancement) return prompt;
-
-    // Add size-specific enhancements to the prompt
-    return `${prompt}, ${enhancement.description}, optimized for ${enhancement.keywords}`;
-}
-
-// Enhanced Generation Function with Better Response Parsing
+// ENHANCED: Generation Function with Updated Model
 async function generateWithAutoFailover(prompt, sizeRatio, maxAttempts = 3) {
     let attempt = 0;
 
@@ -181,18 +141,26 @@ async function generateWithAutoFailover(prompt, sizeRatio, maxAttempts = 3) {
         }
 
         try {
-            console.log(`🔄 Attempt ${attempt + 1}: Using key ${keySelection.index + 1}/${API_KEYS.length}`);
+            console.log(`Attempt ${attempt + 1}: Using key ${keySelection.index + 1}/${API_KEYS.length}`);
             const ai = new GoogleGenAI({ apiKey: keySelection.key });
 
-            // Enhanced prompt with size ratio optimization
-            let finalPrompt = enhancePromptWithSizeRatio(prompt.trim(), sizeRatio);
+            let finalPrompt = prompt.trim();
+            if (sizeRatio) {
+                const sizeDescription = {
+                    '1:1': 'square format',
+                    '4:3': 'standard landscape format',
+                    '16:9': 'wide landscape format',
+                    '9:16': 'portrait format'
+                };
+                finalPrompt += `, ${sizeDescription[sizeRatio] || 'standard format'}`;
+            }
 
-            console.log(`🤖 Using model: gemini-2.5-flash-image-preview`);
-            console.log(`📝 Enhanced prompt: ${finalPrompt.substring(0, 100)}...`);
+            console.log(`Using model: gemini-2.5-flash-image-preview`);
+            console.log(`Final prompt: ${finalPrompt.substring(0, 100)}...`);
 
-            // Using updated model gemini-2.5-flash-image-preview
+            // UPDATED: Using new model gemini-2.5-flash-image-preview
             const result = await ai.models.generateContent({
-                model: "gemini-2.5-flash-image-preview",
+                model: "gemini-2.5-flash-image-preview",  // Updated model
                 contents: [{
                     parts: [{ text: finalPrompt }]
                 }],
@@ -201,11 +169,10 @@ async function generateWithAutoFailover(prompt, sizeRatio, maxAttempts = 3) {
                 }
             });
 
-            console.log(`✅ Success with key ${keySelection.index + 1}`);
-            keyRotator.markKeySuccess(keySelection.index);
+            console.log(`Success with key ${keySelection.index + 1}`);
 
-            // Enhanced logging for debugging
-            console.log('📦 Response structure:', JSON.stringify({
+            // ENHANCED: Log full response structure for debugging
+            console.log('Response structure:', JSON.stringify({
                 hasCandidates: !!result.candidates,
                 candidatesLength: result.candidates?.length || 0,
                 firstCandidateKeys: result.candidates?.[0] ? Object.keys(result.candidates[0]) : [],
@@ -216,19 +183,19 @@ async function generateWithAutoFailover(prompt, sizeRatio, maxAttempts = 3) {
             return { result, keyIndex: keySelection.index };
 
         } catch (error) {
-            console.error(`❌ Key ${keySelection.index + 1} failed:`, error.message);
+            console.error(`Key ${keySelection.index + 1} failed:`, error.message);
 
             if (error.message.includes('429') ||
                 error.message.includes('quota') ||
                 error.message.includes('RESOURCE_EXHAUSTED')) {
 
                 keyRotator.markKeyExhausted(keySelection.index);
-                console.log(`🔄 Switching to next available key...`);
+                console.log(`Switching to next available key...`);
                 attempt++;
 
                 if (attempt < maxAttempts) {
                     const delay = attempt * 1000;
-                    console.log(`⏳ Waiting ${delay}ms before next attempt...`);
+                    console.log(`Waiting ${delay}ms before next attempt...`);
                     await new Promise(resolve => setTimeout(resolve, delay));
                 }
             } else {
@@ -246,29 +213,23 @@ app.get('/', (req, res) => {
     res.json({
         message: 'Gemini Backend - Multi-Key AI Image Generator',
         status: 'Running',
-        model: 'gemini-2.5-flash-image-preview',
+        model: 'gemini-2.5-flash-image-preview',  // Updated model info
         keyInfo: {
             totalKeys: status.totalKeys,
             healthyKeys: status.healthyKeys,
             remainingCapacity: status.remainingCapacity,
             capacityPercentage: status.capacityPercentage + '%'
         },
-        features: [
-            'Multi-API Key Rotation',
-            'Enhanced Size Ratio Support',
-            'Smart Prompt Enhancement',
-            '2000 Character Limit'
-        ],
         cors: 'Enabled for ddmalarfun.net',
         timestamp: new Date().toISOString(),
-        version: '3.1.0 - Enhanced Model Support',
-        maxPromptLength: 2000
+        version: '3.1.0 - Updated Model Support',  // Updated version
+        maxPromptLength: 2000  // Added max prompt info
     });
 });
 
 // Health check endpoint
 app.get('/health', (req, res) => {
-    console.log('🏥 Health check requested from:', req.get('Origin') || 'Unknown');
+    console.log('Health check requested from:', req.get('Origin') || 'Unknown');
     const status = keyRotator.getStatus();
 
     res.status(200).json({
@@ -280,7 +241,6 @@ app.get('/health', (req, res) => {
             totalKeys: status.totalKeys,
             healthyKeys: status.healthyKeys,
             totalUsage: status.totalUsage,
-            totalSuccess: status.totalSuccess,
             remainingCapacity: status.remainingCapacity,
             capacityPercentage: status.capacityPercentage + '%'
         },
@@ -290,52 +250,50 @@ app.get('/health', (req, res) => {
     });
 });
 
-// Enhanced Image Generation with Multiple Extraction Methods
+// COMPLETELY FIXED: Enhanced Image Generation with Multiple Extraction Methods
 app.post('/generate', async (req, res) => {
     const startTime = Date.now();
     const { prompt, sizeRatio } = req.body;
 
-    console.log('🎨 Image generation request:', {
+    console.log('Single image request:', {
         prompt: prompt?.substring(0, 50) + '...',
         promptLength: prompt?.length || 0,
-        sizeRatio: sizeRatio || '1:1',
+        sizeRatio,
         model: 'gemini-2.5-flash-image-preview',
         timestamp: new Date().toISOString()
     });
 
-    // Enhanced validation
     if (!prompt || prompt.trim() === '') {
         return res.status(400).json({
             success: false,
-            error: 'Prompt is required and cannot be empty',
-            model: 'gemini-2.5-flash-image-preview'
+            error: 'Prompt is required and cannot be empty'
         });
     }
 
+    // ENHANCED: Validate prompt length (2000 characters)
     if (prompt.length > 2000) {
         return res.status(400).json({
             success: false,
             error: 'Prompt must be 2000 characters or less',
             promptLength: prompt.length,
-            maxLength: 2000,
-            model: 'gemini-2.5-flash-image-preview'
+            maxLength: 2000
         });
     }
 
     try {
         const { result, keyIndex } = await generateWithAutoFailover(prompt, sizeRatio);
 
-        // Enhanced multiple extraction methods with detailed logging
+        // ENHANCED: Multiple extraction methods with detailed logging
         let imageUrl = null;
         let extractionMethod = 'none';
 
-        console.log('🔍 Starting image extraction...');
+        console.log('Starting image extraction...');
 
         // Method 1: Standard extraction from result.candidates[0]
         if (result?.candidates?.length > 0) {
             const candidate = result.candidates[0];
 
-            console.log('📊 Candidate structure:', {
+            console.log('Candidate structure:', {
                 hasContent: !!candidate.content,
                 hasParts: !!candidate.content?.parts,
                 partsCount: candidate.content?.parts?.length || 0
@@ -345,7 +303,7 @@ app.post('/generate', async (req, res) => {
                 for (let i = 0; i < candidate.content.parts.length; i++) {
                     const part = candidate.content.parts[i];
 
-                    console.log(`🔸 Part ${i}:`, {
+                    console.log(`Part ${i}:`, {
                         hasInlineData: !!part.inlineData,
                         hasData: !!part.inlineData?.data,
                         dataLength: part.inlineData?.data?.length || 0,
@@ -356,7 +314,7 @@ app.post('/generate', async (req, res) => {
                         const mimeType = part.inlineData.mimeType || 'image/png';
                         imageUrl = `data:${mimeType};base64,${part.inlineData.data}`;
                         extractionMethod = `standard-part-${i}`;
-                        console.log(`✅ Image extracted via method: ${extractionMethod}`);
+                        console.log(`Image extracted via method: ${extractionMethod}`);
                         break;
                     }
                 }
@@ -365,7 +323,7 @@ app.post('/generate', async (req, res) => {
 
         // Method 2: Try direct candidates array access
         if (!imageUrl && result?.candidates) {
-            console.log('🔍 Trying direct candidates access...');
+            console.log('Trying direct candidates access...');
             const candidates = Array.isArray(result.candidates) ? result.candidates : [result.candidates];
 
             for (let candIndex = 0; candIndex < candidates.length; candIndex++) {
@@ -377,7 +335,7 @@ app.post('/generate', async (req, res) => {
                             const mimeType = part.inlineData.mimeType || 'image/png';
                             imageUrl = `data:${mimeType};base64,${part.inlineData.data}`;
                             extractionMethod = `direct-cand-${candIndex}-part-${partIndex}`;
-                            console.log(`✅ Image extracted via method: ${extractionMethod}`);
+                            console.log(`Image extracted via method: ${extractionMethod}`);
                             break;
                         }
                     }
@@ -388,7 +346,8 @@ app.post('/generate', async (req, res) => {
 
         // Method 3: Check for alternative response structures
         if (!imageUrl) {
-            console.log('🔍 Trying alternative structures...');
+            console.log('Trying alternative structures...');
+            // Check if image data is elsewhere in response
             if (result?.response?.candidates) {
                 const candidates = result.response.candidates;
                 if (candidates[0]?.content?.parts) {
@@ -397,7 +356,7 @@ app.post('/generate', async (req, res) => {
                             const mimeType = part.inlineData.mimeType || 'image/png';
                             imageUrl = `data:${mimeType};base64,${part.inlineData.data}`;
                             extractionMethod = 'response-candidates';
-                            console.log(`✅ Image extracted via method: ${extractionMethod}`);
+                            console.log(`Image extracted via method: ${extractionMethod}`);
                             break;
                         }
                     }
@@ -409,7 +368,7 @@ app.post('/generate', async (req, res) => {
             const processingTime = Date.now() - startTime;
             const status = keyRotator.getStatus();
 
-            console.log(`🎉 Image extracted successfully using key ${keyIndex + 1}, method: ${extractionMethod}, size: ${imageUrl.length} chars`);
+            console.log(`Image extracted successfully using key ${keyIndex + 1}, method: ${extractionMethod}, size: ${imageUrl.length} chars`);
 
             return res.json({
                 success: true,
@@ -417,7 +376,7 @@ app.post('/generate', async (req, res) => {
                 data: [{ url: imageUrl }],
                 images: [imageUrl],
                 prompt: prompt,
-                sizeRatio: sizeRatio || '1:1',
+                sizeRatio: sizeRatio,
                 processingTime: processingTime,
                 generated_at: new Date().toISOString(),
                 model: 'gemini-2.5-flash-image-preview',
@@ -432,7 +391,7 @@ app.post('/generate', async (req, res) => {
         }
 
         // If no image found, log the complete response for debugging
-        console.error('❌ No image found - Complete response structure:');
+        console.error('No image found - Complete response structure:');
         console.error(JSON.stringify(result, null, 2));
 
         res.status(500).json({
@@ -449,7 +408,7 @@ app.post('/generate', async (req, res) => {
 
     } catch (error) {
         const processingTime = Date.now() - startTime;
-        console.error('❌ Single image generation failed:', error.message);
+        console.error('Single image generation failed:', error.message);
         const status = keyRotator.getStatus();
 
         res.status(500).json({
@@ -469,7 +428,6 @@ app.get('/key-status', (req, res) => {
         keyNumber: i + 1,
         isHealthy: k.isHealthy,
         usageCount: k.usageCount,
-        successCount: k.successCount,
         errorCount: k.errorCount,
         cooldownUntil: k.cooldownUntil ? new Date(k.cooldownUntil).toLocaleString() : null
     }));
@@ -496,11 +454,10 @@ app.post('/reset-keys', (req, res) => {
 
 // Global error handling
 app.use((error, req, res, next) => {
-    console.error('❌ Unhandled error:', error);
+    console.error('Unhandled error:', error);
     res.status(500).json({
         success: false,
-        error: 'Internal server error',
-        model: 'gemini-2.5-flash-image-preview'
+        error: 'Internal server error'
     });
 });
 
@@ -509,22 +466,20 @@ app.use('*', (req, res) => {
     res.status(404).json({
         success: false,
         error: 'Endpoint not found',
-        availableEndpoints: ['/', '/health', '/generate', '/key-status', '/reset-keys'],
-        model: 'gemini-2.5-flash-image-preview'
+        availableEndpoints: ['/', '/health', '/generate', '/key-status', '/reset-keys']
     });
 });
 
 // Start server
 app.listen(PORT, () => {
-    console.log(`🚀 Gemini Multi-Key Backend running on port ${PORT}`);
-    console.log(`🤖 Using model: gemini-2.5-flash-image-preview`);
-    console.log(`📝 Max prompt length: 2000 characters`);
-    console.log(`🔑 Loaded ${API_KEYS.length} API keys`);
-    console.log(`📊 Total daily capacity: ${API_KEYS.length * 95} images`);
-    console.log(`🏥 Health check: http://localhost:${PORT}/health`);
-    console.log(`📈 Key status: http://localhost:${PORT}/key-status`);
+    console.log(`Gemini Multi-Key Backend running on port ${PORT}`);
+    console.log(`Using model: gemini-2.5-flash-image-preview`);
+    console.log(`Max prompt length: 2000 characters`);
+    console.log(`Loaded ${API_KEYS.length} API keys`);
+    console.log(`Total daily capacity: ${API_KEYS.length * 95} images`);
+    console.log(`Health check: http://localhost:${PORT}/health`);
+    console.log(`Key status: http://localhost:${PORT}/key-status`);
 
     const status = keyRotator.getStatus();
-    console.log(`⚡ Current capacity: ${status.remainingCapacity} images remaining`);
-    console.log(`✅ Server initialized successfully!`);
+    console.log(`Current capacity: ${status.remainingCapacity} images remaining`);
 });
