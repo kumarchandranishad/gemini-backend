@@ -166,4 +166,365 @@ function enhancePromptWithSizeRatio(prompt, sizeRatio) {
     if (!enhancement) return prompt;
 
     // Add size-specific enhancements to the prompt
-    return
+    return `${prompt}, ${enhancement.description}, optimized for ${enhancement.keywords}`;
+}
+
+// Enhanced Generation Function with Better Response Parsing
+async function generateWithAutoFailover(prompt, sizeRatio, maxAttempts = 3) {
+    let attempt = 0;
+
+    while (attempt < maxAttempts) {
+        const keySelection = keyRotator.getNextAvailableKey();
+
+        if (!keySelection) {
+            throw new Error('All API keys exhausted. Please try again tomorrow at 1:30 PM IST.');
+        }
+
+        try {
+            console.log(`🔄 Attempt ${attempt + 1}: Using key ${keySelection.index + 1}/${API_KEYS.length}`);
+            const ai = new GoogleGenAI({ apiKey: keySelection.key });
+
+            // Enhanced prompt with size ratio optimization
+            let finalPrompt = enhancePromptWithSizeRatio(prompt.trim(), sizeRatio);
+
+            console.log(`🤖 Using model: gemini-2.5-flash-image-preview`);
+            console.log(`📝 Enhanced prompt: ${finalPrompt.substring(0, 100)}...`);
+
+            // Using updated model gemini-2.5-flash-image-preview
+            const result = await ai.models.generateContent({
+                model: "gemini-2.5-flash-image-preview",
+                contents: [{
+                    parts: [{ text: finalPrompt }]
+                }],
+                config: {
+                    responseModalities: ["IMAGE", "TEXT"]
+                }
+            });
+
+            console.log(`✅ Success with key ${keySelection.index + 1}`);
+            keyRotator.markKeySuccess(keySelection.index);
+
+            // Enhanced logging for debugging
+            console.log('📦 Response structure:', JSON.stringify({
+                hasCandidates: !!result.candidates,
+                candidatesLength: result.candidates?.length || 0,
+                firstCandidateKeys: result.candidates?.[0] ? Object.keys(result.candidates[0]) : [],
+                contentKeys: result.candidates?.[0]?.content ? Object.keys(result.candidates[0].content) : [],
+                partsLength: result.candidates?.[0]?.content?.parts?.length || 0
+            }, null, 2));
+
+            return { result, keyIndex: keySelection.index };
+
+        } catch (error) {
+            console.error(`❌ Key ${keySelection.index + 1} failed:`, error.message);
+
+            if (error.message.includes('429') ||
+                error.message.includes('quota') ||
+                error.message.includes('RESOURCE_EXHAUSTED')) {
+
+                keyRotator.markKeyExhausted(keySelection.index);
+                console.log(`🔄 Switching to next available key...`);
+                attempt++;
+
+                if (attempt < maxAttempts) {
+                    const delay = attempt * 1000;
+                    console.log(`⏳ Waiting ${delay}ms before next attempt...`);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                }
+            } else {
+                attempt++;
+            }
+        }
+    }
+
+    throw new Error(`Image generation failed after ${maxAttempts} attempts with different keys`);
+}
+
+// Root endpoint
+app.get('/', (req, res) => {
+    const status = keyRotator.getStatus();
+    res.json({
+        message: 'Gemini Backend - Multi-Key AI Image Generator',
+        status: 'Running',
+        model: 'gemini-2.5-flash-image-preview',
+        keyInfo: {
+            totalKeys: status.totalKeys,
+            healthyKeys: status.healthyKeys,
+            remainingCapacity: status.remainingCapacity,
+            capacityPercentage: status.capacityPercentage + '%'
+        },
+        features: [
+            'Multi-API Key Rotation',
+            'Enhanced Size Ratio Support',
+            'Smart Prompt Enhancement',
+            '2000 Character Limit'
+        ],
+        cors: 'Enabled for ddmalarfun.net',
+        timestamp: new Date().toISOString(),
+        version: '3.1.0 - Enhanced Model Support',
+        maxPromptLength: 2000
+    });
+});
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+    console.log('🏥 Health check requested from:', req.get('Origin') || 'Unknown');
+    const status = keyRotator.getStatus();
+
+    res.status(200).json({
+        status: 'healthy',
+        model: 'gemini-2.5-flash-image-preview',
+        uptime: process.uptime(),
+        timestamp: new Date().toISOString(),
+        multiKeyStatus: {
+            totalKeys: status.totalKeys,
+            healthyKeys: status.healthyKeys,
+            totalUsage: status.totalUsage,
+            totalSuccess: status.totalSuccess,
+            remainingCapacity: status.remainingCapacity,
+            capacityPercentage: status.capacityPercentage + '%'
+        },
+        cors: 'Enabled',
+        allowedOrigin: 'https://ddmalarfun.net',
+        maxPromptLength: 2000
+    });
+});
+
+// Enhanced Image Generation with Multiple Extraction Methods
+app.post('/generate', async (req, res) => {
+    const startTime = Date.now();
+    const { prompt, sizeRatio } = req.body;
+
+    console.log('🎨 Image generation request:', {
+        prompt: prompt?.substring(0, 50) + '...',
+        promptLength: prompt?.length || 0,
+        sizeRatio: sizeRatio || '1:1',
+        model: 'gemini-2.5-flash-image-preview',
+        timestamp: new Date().toISOString()
+    });
+
+    // Enhanced validation
+    if (!prompt || prompt.trim() === '') {
+        return res.status(400).json({
+            success: false,
+            error: 'Prompt is required and cannot be empty',
+            model: 'gemini-2.5-flash-image-preview'
+        });
+    }
+
+    if (prompt.length > 2000) {
+        return res.status(400).json({
+            success: false,
+            error: 'Prompt must be 2000 characters or less',
+            promptLength: prompt.length,
+            maxLength: 2000,
+            model: 'gemini-2.5-flash-image-preview'
+        });
+    }
+
+    try {
+        const { result, keyIndex } = await generateWithAutoFailover(prompt, sizeRatio);
+
+        // Enhanced multiple extraction methods with detailed logging
+        let imageUrl = null;
+        let extractionMethod = 'none';
+
+        console.log('🔍 Starting image extraction...');
+
+        // Method 1: Standard extraction from result.candidates[0]
+        if (result?.candidates?.length > 0) {
+            const candidate = result.candidates[0];
+
+            console.log('📊 Candidate structure:', {
+                hasContent: !!candidate.content,
+                hasParts: !!candidate.content?.parts,
+                partsCount: candidate.content?.parts?.length || 0
+            });
+
+            if (candidate?.content?.parts && candidate.content.parts.length > 0) {
+                for (let i = 0; i < candidate.content.parts.length; i++) {
+                    const part = candidate.content.parts[i];
+
+                    console.log(`🔸 Part ${i}:`, {
+                        hasInlineData: !!part.inlineData,
+                        hasData: !!part.inlineData?.data,
+                        dataLength: part.inlineData?.data?.length || 0,
+                        mimeType: part.inlineData?.mimeType
+                    });
+
+                    if (part.inlineData?.data) {
+                        const mimeType = part.inlineData.mimeType || 'image/png';
+                        imageUrl = `data:${mimeType};base64,${part.inlineData.data}`;
+                        extractionMethod = `standard-part-${i}`;
+                        console.log(`✅ Image extracted via method: ${extractionMethod}`);
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Method 2: Try direct candidates array access
+        if (!imageUrl && result?.candidates) {
+            console.log('🔍 Trying direct candidates access...');
+            const candidates = Array.isArray(result.candidates) ? result.candidates : [result.candidates];
+
+            for (let candIndex = 0; candIndex < candidates.length; candIndex++) {
+                const candidate = candidates[candIndex];
+                if (candidate?.content?.parts) {
+                    for (let partIndex = 0; partIndex < candidate.content.parts.length; partIndex++) {
+                        const part = candidate.content.parts[partIndex];
+                        if (part?.inlineData?.data) {
+                            const mimeType = part.inlineData.mimeType || 'image/png';
+                            imageUrl = `data:${mimeType};base64,${part.inlineData.data}`;
+                            extractionMethod = `direct-cand-${candIndex}-part-${partIndex}`;
+                            console.log(`✅ Image extracted via method: ${extractionMethod}`);
+                            break;
+                        }
+                    }
+                }
+                if (imageUrl) break;
+            }
+        }
+
+        // Method 3: Check for alternative response structures
+        if (!imageUrl) {
+            console.log('🔍 Trying alternative structures...');
+            if (result?.response?.candidates) {
+                const candidates = result.response.candidates;
+                if (candidates[0]?.content?.parts) {
+                    for (const part of candidates[0].content.parts) {
+                        if (part?.inlineData?.data) {
+                            const mimeType = part.inlineData.mimeType || 'image/png';
+                            imageUrl = `data:${mimeType};base64,${part.inlineData.data}`;
+                            extractionMethod = 'response-candidates';
+                            console.log(`✅ Image extracted via method: ${extractionMethod}`);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        if (imageUrl) {
+            const processingTime = Date.now() - startTime;
+            const status = keyRotator.getStatus();
+
+            console.log(`🎉 Image extracted successfully using key ${keyIndex + 1}, method: ${extractionMethod}, size: ${imageUrl.length} chars`);
+
+            return res.json({
+                success: true,
+                imageUrl: imageUrl,
+                data: [{ url: imageUrl }],
+                images: [imageUrl],
+                prompt: prompt,
+                sizeRatio: sizeRatio || '1:1',
+                processingTime: processingTime,
+                generated_at: new Date().toISOString(),
+                model: 'gemini-2.5-flash-image-preview',
+                promptLength: prompt.length,
+                keyInfo: {
+                    usedKey: keyIndex + 1,
+                    totalKeys: status.totalKeys,
+                    remainingCapacity: status.remainingCapacity,
+                    extractionMethod: extractionMethod
+                }
+            });
+        }
+
+        // If no image found, log the complete response for debugging
+        console.error('❌ No image found - Complete response structure:');
+        console.error(JSON.stringify(result, null, 2));
+
+        res.status(500).json({
+            success: false,
+            error: 'No image generated in response',
+            debug: {
+                hasCandidates: !!result?.candidates,
+                candidatesLength: result?.candidates?.length || 0,
+                responseKeys: Object.keys(result || {}),
+                extractionMethod: extractionMethod,
+                model: 'gemini-2.5-flash-image-preview'
+            }
+        });
+
+    } catch (error) {
+        const processingTime = Date.now() - startTime;
+        console.error('❌ Single image generation failed:', error.message);
+        const status = keyRotator.getStatus();
+
+        res.status(500).json({
+            success: false,
+            error: error.message,
+            processingTime,
+            keyStatus: status,
+            model: 'gemini-2.5-flash-image-preview'
+        });
+    }
+});
+
+// Key Status Monitoring Endpoint
+app.get('/key-status', (req, res) => {
+    const status = keyRotator.getStatus();
+    const keyDetails = keyRotator.keyHealth.map((k, i) => ({
+        keyNumber: i + 1,
+        isHealthy: k.isHealthy,
+        usageCount: k.usageCount,
+        successCount: k.successCount,
+        errorCount: k.errorCount,
+        cooldownUntil: k.cooldownUntil ? new Date(k.cooldownUntil).toLocaleString() : null
+    }));
+
+    res.json({
+        summary: status,
+        keyDetails: keyDetails,
+        model: 'gemini-2.5-flash-image-preview',
+        maxPromptLength: 2000,
+        timestamp: new Date().toISOString()
+    });
+});
+
+// Reset Endpoint for Testing
+app.post('/reset-keys', (req, res) => {
+    keyRotator.resetAllKeys();
+    res.json({
+        success: true,
+        message: 'All API key quotas and statuses reset',
+        newCapacity: keyRotator.getStatus().remainingCapacity,
+        model: 'gemini-2.5-flash-image-preview'
+    });
+});
+
+// Global error handling
+app.use((error, req, res, next) => {
+    console.error('❌ Unhandled error:', error);
+    res.status(500).json({
+        success: false,
+        error: 'Internal server error',
+        model: 'gemini-2.5-flash-image-preview'
+    });
+});
+
+// 404 handler
+app.use('*', (req, res) => {
+    res.status(404).json({
+        success: false,
+        error: 'Endpoint not found',
+        availableEndpoints: ['/', '/health', '/generate', '/key-status', '/reset-keys'],
+        model: 'gemini-2.5-flash-image-preview'
+    });
+});
+
+// Start server
+app.listen(PORT, () => {
+    console.log(`🚀 Gemini Multi-Key Backend running on port ${PORT}`);
+    console.log(`🤖 Using model: gemini-2.5-flash-image-preview`);
+    console.log(`📝 Max prompt length: 2000 characters`);
+    console.log(`🔑 Loaded ${API_KEYS.length} API keys`);
+    console.log(`📊 Total daily capacity: ${API_KEYS.length * 95} images`);
+    console.log(`🏥 Health check: http://localhost:${PORT}/health`);
+    console.log(`📈 Key status: http://localhost:${PORT}/key-status`);
+
+    const status = keyRotator.getStatus();
+    console.log(`⚡ Current capacity: ${status.remainingCapacity} images remaining`);
+    console.log(`✅ Server initialized successfully!`);
+});
