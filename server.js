@@ -29,12 +29,10 @@ app.use(cors({
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-// Static files serving for uploaded images
-app.use('/uploads', express.static('uploads'));
-
 // Create uploads directory if it doesn't exist
 if (!fs.existsSync('uploads')) {
     fs.mkdirSync('uploads', { recursive: true });
+    console.log('📁 Created uploads directory');
 }
 
 // API Keys Array Setup
@@ -51,7 +49,7 @@ const API_KEYS = [
     process.env.GEMINI_API_KEY_10
 ].filter(key => key);
 
-// API Key Rotator Class (same as before)
+// API Key Rotator Class
 class APIKeyRotator {
     constructor(apiKeys) {
         this.apiKeys = apiKeys;
@@ -153,8 +151,8 @@ class APIKeyRotator {
 const keyRotator = new APIKeyRotator(API_KEYS);
 console.log(`🔑 Initialized with ${API_KEYS.length} API keys`);
 
-// NEW: Enhanced Multer Configuration for Multiple Image Upload
-const storage = multer.memoryStorage(); // Use memory storage for better performance
+// Enhanced Multer Configuration for Multiple Image Upload
+const storage = multer.memoryStorage();
 
 const upload = multer({
     storage: storage,
@@ -163,17 +161,16 @@ const upload = multer({
         files: 10 // Maximum 10 files
     },
     fileFilter: (req, file, cb) => {
-        // Allow only image files
         const allowedMimes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
         if (allowedMimes.includes(file.mimetype)) {
             cb(null, true);
         } else {
-            cb(new Error('Only image files are allowed!'), false);
+            cb(new Error('Only image files (JPEG, PNG, GIF, WEBP) are allowed!'), false);
         }
     }
 });
 
-// Enhanced prompt with size ratio (from previous code)
+// Enhanced prompt with size ratio
 function enhancePromptWithSizeRatio(prompt, sizeRatio) {
     const sizeInstructions = {
         '1:1': {
@@ -201,7 +198,7 @@ function enhancePromptWithSizeRatio(prompt, sizeRatio) {
     return enhancedPrompt;
 }
 
-// NEW: Image Generation Function (Text-only prompts)
+// Text-to-Image Generation Function
 async function generateImageWithAutoFailover(prompt, sizeRatio, maxAttempts = 3) {
     let attempt = 0;
 
@@ -217,7 +214,6 @@ async function generateImageWithAutoFailover(prompt, sizeRatio, maxAttempts = 3)
             const ai = new GoogleGenAI({ apiKey: keySelection.key });
 
             const finalPrompt = enhancePromptWithSizeRatio(prompt, sizeRatio);
-
             console.log(`🤖 Using model: gemini-2.5-flash-image-preview`);
 
             const result = await ai.models.generateContent({
@@ -232,7 +228,6 @@ async function generateImageWithAutoFailover(prompt, sizeRatio, maxAttempts = 3)
 
             console.log(`✅ Success with key ${keySelection.index + 1}`);
             keyRotator.markKeySuccess(keySelection.index);
-
             return { result, keyIndex: keySelection.index };
 
         } catch (error) {
@@ -260,7 +255,7 @@ async function generateImageWithAutoFailover(prompt, sizeRatio, maxAttempts = 3)
     throw new Error(`Image generation failed after ${maxAttempts} attempts with different keys`);
 }
 
-// NEW: Image Editing Function (Images + Prompt)
+// Image Editing Function (Images + Prompt)
 async function editImagesWithAutoFailover(images, prompt, sizeRatio, maxAttempts = 3) {
     let attempt = 0;
 
@@ -275,7 +270,6 @@ async function editImagesWithAutoFailover(images, prompt, sizeRatio, maxAttempts
             console.log(`🔄 Edit Attempt ${attempt + 1}: Using key ${keySelection.index + 1}/${API_KEYS.length}`);
             const ai = new GoogleGenAI({ apiKey: keySelection.key });
 
-            // Build contents array with images and prompt
             const contents = [];
 
             // Add all uploaded images to contents
@@ -293,7 +287,7 @@ async function editImagesWithAutoFailover(images, prompt, sizeRatio, maxAttempts
                 console.log(`📸 Added image ${i + 1}: ${image.originalname} (${image.mimetype})`);
             }
 
-            // Add text prompt (with or without size ratio)
+            // Add text prompt
             const finalPrompt = sizeRatio ? 
                 enhancePromptWithSizeRatio(prompt, sizeRatio) : 
                 prompt;
@@ -312,7 +306,6 @@ async function editImagesWithAutoFailover(images, prompt, sizeRatio, maxAttempts
 
             console.log(`✅ Edit Success with key ${keySelection.index + 1}`);
             keyRotator.markKeySuccess(keySelection.index);
-
             return { result, keyIndex: keySelection.index };
 
         } catch (error) {
@@ -446,7 +439,7 @@ app.get('/health', (req, res) => {
     });
 });
 
-// EXISTING: Text-to-Image Generation Endpoint
+// Text-to-Image Generation Endpoint
 app.post('/generate', async (req, res) => {
     const startTime = Date.now();
     const { prompt, sizeRatio } = req.body;
@@ -532,7 +525,7 @@ app.post('/generate', async (req, res) => {
     }
 });
 
-// NEW: Image Upload & Edit Endpoint
+// Image Upload & Edit Endpoint
 app.post('/edit-images', upload.array('images', 10), async (req, res) => {
     const startTime = Date.now();
     const { prompt, sizeRatio } = req.body;
