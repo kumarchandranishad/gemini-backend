@@ -1,7 +1,7 @@
 {
   "name": "gemini-backend",
-  "version": "4.0.0",
-  "description": "Gemini AI Image Generator & Editor Backend with Upload Support",
+  "version": "4.1.0",
+  "description": "Gemini AI Image Generator & Editor Backend with Enhanced Upload Support",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
