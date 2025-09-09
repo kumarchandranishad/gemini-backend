@@ -116,7 +116,7 @@ app.get('/', (req, res) => {
     res.json({
         project: 'gemini-backend',
         message: 'Gemini AI Image Generator & Editor Backend',
-        version: '4.5.0',
+        version: '4.6.0',
         status: 'running',
         features: [
             'Text-to-Image Generation',
@@ -126,7 +126,7 @@ app.get('/', (req, res) => {
             'File Upload Support (up to 10 images, 10MB each)'
         ],
         endpoints: ['/generate', '/edit-images', '/health'],
-        model: 'gemini-2.0-flash-preview-image',
+        model: 'gemini-2.5-flash-lite',
         timestamp: new Date().toISOString(),
         author: 'Kumar Chandra'
     });
@@ -164,7 +164,7 @@ app.post('/generate', async (req, res) => {
             });
         }
 
-        console.log(`🎨 Generating image: "${prompt.substring(0, 50)}..."`);
+        console.log(`🎨 Generating image with Gemini 2.5 Flash Lite: "${prompt.substring(0, 50)}..."`);
         
         const apiKey = getNextApiKey();
         const ai = new GoogleGenAI({ apiKey });
@@ -172,7 +172,7 @@ app.post('/generate', async (req, res) => {
         const enhancedPrompt = enhancePromptWithRatio(prompt, sizeRatio || '1:1');
 
         const result = await ai.models.generateContent({
-            model: 'gemini-2.0-flash-preview-image',
+            model: 'gemini-2.5-flash-lite',
             contents: [{
                 parts: [{ text: enhancedPrompt }]
             }],
@@ -197,7 +197,7 @@ app.post('/generate', async (req, res) => {
             processingTime: processingTime,
             generatedAt: new Date().toISOString(),
             type: 'text-to-image',
-            model: 'gemini-2.0-flash-preview-image'
+            model: 'gemini-2.5-flash-lite'
         });
 
     } catch (error) {
@@ -249,7 +249,7 @@ app.post('/edit-images', upload.array('images', 10), async (req, res) => {
             });
         }
 
-        console.log(`🖼️ Editing ${images.length} images: "${prompt.substring(0, 50)}..."`);
+        console.log(`🖼️ Editing ${images.length} images with Gemini 2.5 Flash Lite: "${prompt.substring(0, 50)}..."`);
         
         const apiKey = getNextApiKey();
         const ai = new GoogleGenAI({ apiKey });
@@ -275,7 +275,7 @@ app.post('/edit-images', upload.array('images', 10), async (req, res) => {
         contents.push({ text: finalPrompt });
 
         const result = await ai.models.generateContent({
-            model: 'gemini-2.0-flash-preview-image',
+            model: 'gemini-2.5-flash-lite',
             contents: contents,
             config: {
                 responseModalities: ['IMAGE', 'TEXT']
@@ -299,7 +299,7 @@ app.post('/edit-images', upload.array('images', 10), async (req, res) => {
             processingTime: processingTime,
             generatedAt: new Date().toISOString(),
             type: 'image-edit',
-            model: 'gemini-2.0-flash-preview-image'
+            model: 'gemini-2.5-flash-lite'
         });
 
     } catch (error) {
@@ -355,7 +355,7 @@ app.listen(PORT, () => {
     console.log('🚀 GEMINI BACKEND SERVER STARTED');
     console.log('=====================================');
     console.log(`📡 Server running on port ${PORT}`);
-    console.log(`🤖 Model: gemini-2.0-flash-preview-image`);
+    console.log(`🤖 Model: gemini-2.5-flash-lite`);
     console.log(`🔑 API Keys loaded: ${API_KEYS.length}`);
     console.log(`📝 Max prompt length: 2000 characters`);
     console.log(`📸 Max images per request: 10`);
