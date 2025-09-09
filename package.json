@@ -1,7 +1,7 @@
 {
   "name": "gemini-backend",
-  "version": "4.5.0",
-  "description": "Gemini AI Image Generator & Editor Backend with Multi-Image Upload",
+  "version": "4.6.0",
+  "description": "Gemini AI Image Generator & Editor Backend with Gemini 2.0 Flash Preview Image Model",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -19,5 +19,15 @@
   },
   "devDependencies": {
     "nodemon": "^3.0.1"
-  }
+  },
+  "keywords": [
+    "gemini",
+    "ai",
+    "image-generation",
+    "google-ai",
+    "nodejs",
+    "express"
+  ],
+  "author": "Kumar Chandra",
+  "license": "MIT"
 }
