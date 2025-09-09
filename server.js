@@ -97,7 +97,7 @@ function extractImageFromResponse(response) {
     if (!response || !response.candidates) {
         return null;
     }
-    
+
     for (const candidate of response.candidates) {
         if (candidate.content && candidate.content.parts) {
             for (const part of candidate.content.parts) {
@@ -108,7 +108,6 @@ function extractImageFromResponse(response) {
             }
         }
     }
-    
     return null;
 }
 
@@ -127,7 +126,7 @@ app.get('/', (req, res) => {
             'File Upload Support (up to 10 images, 10MB each)'
         ],
         endpoints: ['/generate', '/edit-images', '/health'],
-        model: 'gemini-2.5-flash-image-preview',
+        model: 'gemini-2.0-flash-preview-image',
         timestamp: new Date().toISOString(),
         author: 'Kumar Chandra'
     });
@@ -147,10 +146,9 @@ app.get('/health', (req, res) => {
 // Text-to-image generation endpoint
 app.post('/generate', async (req, res) => {
     const startTime = Date.now();
-    
     try {
         const { prompt, sizeRatio } = req.body;
-        
+
         // Validation
         if (!prompt || typeof prompt !== 'string' || prompt.trim().length === 0) {
             return res.status(400).json({
@@ -158,23 +156,23 @@ app.post('/generate', async (req, res) => {
                 error: 'Prompt is required and must be a non-empty string'
             });
         }
-        
+
         if (prompt.length > 2000) {
             return res.status(400).json({
                 success: false,
                 error: 'Prompt must be 2000 characters or less'
             });
         }
-        
-        console.log(`🎨 Generating image: ${prompt.substring(0, 50)}...`);
+
+        console.log(`🎨 Generating image: "${prompt.substring(0, 50)}..."`);
         
         const apiKey = getNextApiKey();
         const ai = new GoogleGenAI({ apiKey });
         
         const enhancedPrompt = enhancePromptWithRatio(prompt, sizeRatio || '1:1');
-        
+
         const result = await ai.models.generateContent({
-            model: 'gemini-2.5-flash-image-preview',
+            model: 'gemini-2.0-flash-preview-image',
             contents: [{
                 parts: [{ text: enhancedPrompt }]
             }],
@@ -182,17 +180,15 @@ app.post('/generate', async (req, res) => {
                 responseModalities: ['IMAGE', 'TEXT']
             }
         });
-        
+
         const imageUrl = extractImageFromResponse(result);
-        
         if (!imageUrl) {
             throw new Error('Failed to extract image from API response');
         }
-        
+
         const processingTime = Date.now() - startTime;
-        
         console.log(`✅ Image generated successfully in ${processingTime}ms`);
-        
+
         res.json({
             success: true,
             imageUrl: imageUrl,
@@ -201,12 +197,12 @@ app.post('/generate', async (req, res) => {
             processingTime: processingTime,
             generatedAt: new Date().toISOString(),
             type: 'text-to-image',
-            model: 'gemini-2.5-flash-image-preview'
+            model: 'gemini-2.0-flash-preview-image'
         });
-        
+
     } catch (error) {
         const processingTime = Date.now() - startTime;
-        console.error('❌ Generation failed:', error.message);
+        console.error('❌ Generation failed:', error);
         
         res.status(500).json({
             success: false,
@@ -220,11 +216,10 @@ app.post('/generate', async (req, res) => {
 // Image upload & edit endpoint
 app.post('/edit-images', upload.array('images', 10), async (req, res) => {
     const startTime = Date.now();
-    
     try {
         const { prompt, sizeRatio } = req.body;
         const images = req.files;
-        
+
         // Validation
         if (!images || images.length === 0) {
             return res.status(400).json({
@@ -232,33 +227,33 @@ app.post('/edit-images', upload.array('images', 10), async (req, res) => {
                 error: 'At least one image is required'
             });
         }
-        
+
         if (!prompt || typeof prompt !== 'string' || prompt.trim().length === 0) {
             return res.status(400).json({
                 success: false,
                 error: 'Prompt is required and must be a non-empty string'
             });
         }
-        
+
         if (prompt.length > 2000) {
             return res.status(400).json({
                 success: false,
                 error: 'Prompt must be 2000 characters or less'
             });
         }
-        
+
         if (images.length > 10) {
             return res.status(400).json({
                 success: false,
                 error: 'Maximum 10 images allowed'
             });
         }
-        
-        console.log(`🖼️ Editing ${images.length} images: ${prompt.substring(0, 50)}...`);
+
+        console.log(`🖼️ Editing ${images.length} images: "${prompt.substring(0, 50)}..."`);
         
         const apiKey = getNextApiKey();
         const ai = new GoogleGenAI({ apiKey });
-        
+
         // Build contents array with images and prompt
         const contents = [];
         
@@ -271,32 +266,30 @@ app.post('/edit-images', upload.array('images', 10), async (req, res) => {
                 }
             });
         }
-        
+
         // Add the prompt (with or without ratio enhancement)
         const finalPrompt = sizeRatio ? 
             enhancePromptWithRatio(prompt, sizeRatio) : 
             prompt;
         
         contents.push({ text: finalPrompt });
-        
+
         const result = await ai.models.generateContent({
-            model: 'gemini-2.5-flash-image-preview',
+            model: 'gemini-2.0-flash-preview-image',
             contents: contents,
             config: {
                 responseModalities: ['IMAGE', 'TEXT']
             }
         });
-        
+
         const imageUrl = extractImageFromResponse(result);
-        
         if (!imageUrl) {
             throw new Error('Failed to extract edited image from API response');
         }
-        
+
         const processingTime = Date.now() - startTime;
-        
         console.log(`✅ Images edited successfully in ${processingTime}ms`);
-        
+
         res.json({
             success: true,
             imageUrl: imageUrl,
@@ -306,12 +299,12 @@ app.post('/edit-images', upload.array('images', 10), async (req, res) => {
             processingTime: processingTime,
             generatedAt: new Date().toISOString(),
             type: 'image-edit',
-            model: 'gemini-2.5-flash-image-preview'
+            model: 'gemini-2.0-flash-preview-image'
         });
-        
+
     } catch (error) {
         const processingTime = Date.now() - startTime;
-        console.error('❌ Edit failed:', error.message);
+        console.error('❌ Edit failed:', error);
         
         res.status(500).json({
             success: false,
@@ -331,6 +324,7 @@ app.use((error, req, res, next) => {
                 error: 'File size too large. Maximum size is 10MB per file.'
             });
         }
+        
         if (error.code === 'LIMIT_FILE_COUNT') {
             return res.status(400).json({
                 success: false,
@@ -338,7 +332,7 @@ app.use((error, req, res, next) => {
             });
         }
     }
-    
+
     console.error('❌ Unhandled error:', error);
     res.status(500).json({
         success: false,
@@ -361,7 +355,7 @@ app.listen(PORT, () => {
     console.log('🚀 GEMINI BACKEND SERVER STARTED');
     console.log('=====================================');
     console.log(`📡 Server running on port ${PORT}`);
-    console.log(`🤖 Model: gemini-2.5-flash-image-preview`);
+    console.log(`🤖 Model: gemini-2.0-flash-preview-image`);
     console.log(`🔑 API Keys loaded: ${API_KEYS.length}`);
     console.log(`📝 Max prompt length: 2000 characters`);
     console.log(`📸 Max images per request: 10`);
