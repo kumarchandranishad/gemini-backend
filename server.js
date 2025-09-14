@@ -28,7 +28,6 @@ if (!fs.existsSync(UPLOADS_DIR)) {
     console.log('📁 Created uploads directory');
 }
 
-// Serve static files
 app.use('/uploads', express.static(UPLOADS_DIR));
 
 // Load BytePlus API keys from environment
@@ -76,69 +75,48 @@ const upload = multer({
 // Enhanced prompt with size ratio for BytePlus Seedream-4.0
 function enhancePromptWithRatio(prompt, ratio) {
     const ratioMap = {
-        '1:1': 'square format with 1:1 aspect ratio, centered composition',
-        '4:3': '4:3 aspect ratio format, standard landscape proportions', 
-        '16:9': '16:9 widescreen aspect ratio format, cinematic view',
-        '9:16': '9:16 portrait aspect ratio format, vertical composition'
+        '1:1': 'square format, 1:1 aspect ratio',
+        '4:3': '4:3 aspect ratio format, landscape proportions', 
+        '16:9': '16:9 widescreen aspect ratio, cinematic view',
+        '9:16': '9:16 portrait aspect ratio, vertical composition'
     };
     
     const enhancement = ratioMap[ratio] || ratioMap['1:1'];
-    return `${prompt.trim()}, high quality, detailed, professional, 8k resolution, ${enhancement}`;
+    return `${prompt.trim()}, high quality, detailed, professional, ${enhancement}`;
 }
 
-// BytePlus ModelArk API call function
+// BytePlus Seedream-4.0 API call function
 async function callBytePlusAPI(prompt, imageData = null, sizeRatio = '1:1') {
     const apiKey = getNextApiKey();
     
-    // BytePlus ModelArk API endpoint
-    const url = 'https://ark.cn-beijing.volces.com/api/v3/chat/completions';
+    // Correct BytePlus ModelArk API endpoint
+    const url = 'https://ark.ap-southeast.bytepluses.com/api/v3/images/generations';
     
     const headers = {
         'Authorization': `Bearer ${apiKey}`,
         'Content-Type': 'application/json'
     };
 
-    let requestBody;
+    // Size mapping for BytePlus
+    const sizeMap = {
+        '1:1': '2K',
+        '4:3': '2K', 
+        '16:9': '2K',
+        '9:16': '2K'
+    };
 
+    let requestBody = {
+        model: 'seedream-4-0-250828', // Correct model name
+        prompt: enhancePromptWithRatio(prompt, sizeRatio),
+        size: sizeMap[sizeRatio] || '2K',
+        stream: false,
+        response_format: 'url',
+        watermark: false
+    };
+
+    // If image editing mode
     if (imageData) {
-        // Image editing mode
-        requestBody = {
-            model: 'Seedream-4.0',
-            messages: [
-                {
-                    role: 'user',
-                    content: [
-                        {
-                            type: 'text',
-                            text: enhancePromptWithRatio(prompt, sizeRatio)
-                        },
-                        {
-                            type: 'image_url',
-                            image_url: {
-                                url: `data:image/jpeg;base64,${imageData}`
-                            }
-                        }
-                    ]
-                }
-            ],
-            stream: false,
-            max_tokens: 4096,
-            temperature: 0.7
-        };
-    } else {
-        // Text-to-image generation
-        requestBody = {
-            model: 'Seedream-4.0',
-            messages: [
-                {
-                    role: 'user',
-                    content: enhancePromptWithRatio(prompt, sizeRatio)
-                }
-            ],
-            stream: false,
-            max_tokens: 4096,
-            temperature: 0.7
-        };
+        requestBody.image = `data:image/jpeg;base64,${imageData}`;
     }
 
     const response = await fetch(url, {
@@ -157,34 +135,12 @@ async function callBytePlusAPI(prompt, imageData = null, sizeRatio = '1:1') {
 
 // Extract image from BytePlus response
 function extractImageFromBytePlusResponse(response) {
-    if (!response || !response.choices || !response.choices[0]) {
+    if (!response || !response.data || !response.data[0]) {
         return null;
     }
 
-    const choice = response.choices[0];
-    if (choice.message && choice.message.content) {
-        const content = choice.message.content;
-        
-        // Check if content contains image data
-        if (typeof content === 'string') {
-            // Look for base64 image data
-            const base64Match = content.match(/data:image\/[^;]+;base64,([^"\\s]+)/);
-            if (base64Match) {
-                return base64Match[0];
-            }
-        }
-        
-        // If content is array, look for image in it
-        if (Array.isArray(content)) {
-            for (const item of content) {
-                if (item.type === 'image_url' && item.image_url && item.image_url.url) {
-                    return item.image_url.url;
-                }
-            }
-        }
-    }
-
-    return null;
+    // BytePlus returns image URL in data array
+    return response.data[0].url;
 }
 
 // Root endpoint
@@ -203,7 +159,7 @@ app.get('/', (req, res) => {
             'Free Quota: 200 images per API key'
         ],
         endpoints: ['/generate', '/edit-images', '/health'],
-        model: 'Seedream-4.0',
+        model: 'seedream-4-0-250828',
         provider: 'BytePlus ModelArk',
         timestamp: new Date().toISOString(),
         author: 'Kumar Chandra'
@@ -217,7 +173,7 @@ app.get('/health', (req, res) => {
         project: 'byteplus-seedream-backend',
         apiKeys: BYTEPLUS_API_KEYS.length,
         uptime: process.uptime(),
-        model: 'Seedream-4.0',
+        model: 'seedream-4-0-250828',
         provider: 'BytePlus ModelArk',
         timestamp: new Date().toISOString()
     });
@@ -251,24 +207,7 @@ app.post('/generate', async (req, res) => {
         const imageUrl = extractImageFromBytePlusResponse(result);
 
         if (!imageUrl) {
-            // Generate a mock response for testing (remove in production)
-            const mockImageUrl = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNTEyIiBoZWlnaHQ9IjUxMiIgdmlld0JveD0iMCAwIDUxMiA1MTIiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxyZWN0IHdpZHRoPSI1MTIiIGhlaWdodD0iNTEyIiBmaWxsPSIjNjM2NmYxIi8+Cjx0ZXh0IHg9IjI1NiIgeT0iMjU2IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBkeT0iLjNlbSIgZmlsbD0id2hpdGUiIGZvbnQtZmFtaWx5PSJzYW5zLXNlcmlmIiBmb250LXNpemU9IjI0Ij5CeXRlUGx1cyBTZWVkcmVhbS00LjA8L3RleHQ+Cjx0ZXh0IHg9IjI1NiIgeT0iMzAwIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBkeT0iLjNlbSIgZmlsbD0id2hpdGUiIGZvbnQtZmFtaWx5PSJzYW5zLXNlcmlmIiBmb250LXNpemU9IjE2Ij5JbWFnZSBHZW5lcmF0ZWQ8L3RleHQ+Cjwvc3ZnPg==';
-            
-            const processingTime = Date.now() - startTime;
-            console.log(`✅ Mock image generated in ${processingTime}ms`);
-
-            return res.json({
-                success: true,
-                imageUrl: mockImageUrl,
-                prompt: prompt,
-                sizeRatio: sizeRatio || '1:1',
-                processingTime: processingTime,
-                generatedAt: new Date().toISOString(),
-                type: 'text-to-image',
-                model: 'Seedream-4.0',
-                provider: 'BytePlus ModelArk',
-                note: 'Mock response - replace with actual API integration'
-            });
+            throw new Error('Failed to extract image from BytePlus API response');
         }
 
         const processingTime = Date.now() - startTime;
@@ -282,7 +221,7 @@ app.post('/generate', async (req, res) => {
             processingTime: processingTime,
             generatedAt: new Date().toISOString(),
             type: 'text-to-image',
-            model: 'Seedream-4.0',
+            model: 'seedream-4-0-250828',
             provider: 'BytePlus ModelArk'
         });
 
@@ -329,16 +268,9 @@ app.post('/edit-images', upload.array('images', 10), async (req, res) => {
             });
         }
 
-        if (images.length > 10) {
-            return res.status(400).json({
-                success: false,
-                error: 'Maximum 10 images allowed'
-            });
-        }
-
         console.log(`🖼️ Editing ${images.length} images with Seedream-4.0: ${prompt.substring(0, 50)}...`);
         
-        // Use first image for editing (Seedream-4.0 typically works with one image at a time)
+        // Use first image for editing
         const firstImage = images[0];
         const imageBase64 = firstImage.buffer.toString('base64');
         
@@ -346,25 +278,7 @@ app.post('/edit-images', upload.array('images', 10), async (req, res) => {
         const imageUrl = extractImageFromBytePlusResponse(result);
 
         if (!imageUrl) {
-            // Generate a mock edited image for testing
-            const mockImageUrl = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNTEyIiBoZWlnaHQ9IjUxMiIgdmlld0JveD0iMCAwIDUxMiA1MTIiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxyZWN0IHdpZHRoPSI1MTIiIGhlaWdodD0iNTEyIiBmaWxsPSIjMTBiOTgxIi8+Cjx0ZXh0IHg9IjI1NiIgeT0iMjU2IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBkeT0iLjNlbSIgZmlsbD0id2hpdGUiIGZvbnQtZmFtaWx5PSJzYW5zLXNlcmlmIiBmb250LXNpemU9IjI0Ij5CeXRlUGx1cyBTZWVkcmVhbS00LjA8L3RleHQ+Cjx0ZXh0IHg9IjI1NiIgeT0iMzAwIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBkeT0iLjNlbSIgZmlsbD0id2hpdGUiIGZvbnQtZmFtaWx5PSJzYW5zLXNlcmlmIiBmb250LXNpemU9IjE2Ij5JbWFnZSBFZGl0ZWQ8L3RleHQ+Cjwvc3ZnPg==';
-            
-            const processingTime = Date.now() - startTime;
-            console.log(`✅ Mock image edited in ${processingTime}ms`);
-
-            return res.json({
-                success: true,
-                imageUrl: mockImageUrl,
-                prompt: prompt,
-                sizeRatio: sizeRatio || 'original',
-                inputImageCount: images.length,
-                processingTime: processingTime,
-                generatedAt: new Date().toISOString(),
-                type: 'image-edit',
-                model: 'Seedream-4.0',
-                provider: 'BytePlus ModelArk',
-                note: 'Mock response - replace with actual API integration'
-            });
+            throw new Error('Failed to extract edited image from BytePlus API response');
         }
 
         const processingTime = Date.now() - startTime;
@@ -379,7 +293,7 @@ app.post('/edit-images', upload.array('images', 10), async (req, res) => {
             processingTime: processingTime,
             generatedAt: new Date().toISOString(),
             type: 'image-edit',
-            model: 'Seedream-4.0',
+            model: 'seedream-4-0-250828',
             provider: 'BytePlus ModelArk'
         });
 
@@ -436,7 +350,7 @@ app.listen(PORT, () => {
     console.log('🚀 BYTEPLUS SEEDREAM-4.0 BACKEND STARTED');
     console.log('==========================================');
     console.log(`📡 Server running on port ${PORT}`);
-    console.log(`🤖 Model: Seedream-4.0`);
+    console.log(`🤖 Model: seedream-4-0-250828`);
     console.log(`🏢 Provider: BytePlus ModelArk`);
     console.log(`🔑 API Keys loaded: ${BYTEPLUS_API_KEYS.length}`);
     console.log(`📝 Max prompt length: 2000 characters`);
